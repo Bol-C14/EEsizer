@@ -1,7 +1,9 @@
 from pathlib import Path
 
+from pathlib import Path
+
 from eesizer_core.config import AgentConfig, OptimizationConfig, SimulationConfig
-from eesizer_core.context import ContextManager
+from eesizer_core.context import ArtifactKind, ContextManager
 from eesizer_core.agents.simple import OptimizationTargets, SimpleSizingAgent
 from eesizer_core.simulation import MockNgSpiceSimulator
 
@@ -16,7 +18,7 @@ R1 vdd out 2k
 
 
 def build_agent(tmp_path: Path) -> SimpleSizingAgent:
-    sim_cfg = SimulationConfig(binary_path=Path("ngspice"), working_root=tmp_path)
+    sim_cfg = SimulationConfig(binary_path=Path("ngspice"))
     opt_cfg = OptimizationConfig(max_iterations=5, tolerance_percent=0.05, vgs_margin_volts=0.05)
     agent_cfg = AgentConfig(
         name="test-agent",
@@ -40,9 +42,13 @@ def test_simple_agent_run(tmp_path):
 
     with ContextManager(run_id="test", base_dir=tmp_path, config_name="test") as ctx:
         ctx.netlist_path = netlist_path
+        ctx.set_environment(corner="tt", supply_voltage=1.8, temperature_c=27.0)
         result = agent.run(ctx)
 
     assert result.success
     assert result.metrics["gain_db"] >= 35.0
-    assert "optimization_summary" in result.artifacts
-    assert Path(result.artifacts["netlist_copy"]).exists()
+    assert result.artifacts["optimization_summary"].kind == ArtifactKind.OPTIMIZATION
+    assert result.artifacts["netlist_copy"].kind == ArtifactKind.NETLIST
+    assert Path(result.artifacts["netlist_copy"].path).exists()
+    assert result.artifacts["simulation_summary"].kind == ArtifactKind.SIMULATION
+    assert Path(result.artifacts["optimization_history_csv"].path).exists()

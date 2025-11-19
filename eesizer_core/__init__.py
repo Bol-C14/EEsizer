@@ -1,18 +1,36 @@
 """Draft package for consolidating shared agent infrastructure."""
 
-from .config import AgentConfig, ConfigLoader, OrchestratorConfig
-from .context import ContextManager, ExecutionContext
+from .config import (
+    AgentConfig,
+    ConfigLoader,
+    OptimizationConfig,
+    OrchestratorConfig,
+    OutputPathPolicy,
+    SimulationConfig,
+    ToolConfig,
+)
+from .context import ArtifactKind, ArtifactRecord, ContextManager, EnvironmentMetadata, ExecutionContext
 from .messaging import Message, MessageBundle, MessageRole, ToolCall, ToolResult
 from .netlist import NetlistData, NetlistSummary, load_netlist, summarize_netlist
-from .simulation import MockNgSpiceSimulator
+from .prompts import PromptLibrary
+from .simulation import MockNgSpiceSimulator, NgSpiceRunner
+from .spice import ControlDeck
 from .agents.simple import OptimizationTargets, SimpleSizingAgent
+from .toolchain import ToolChainExecutor, ToolChainParser, ToolRegistry
 
 __all__ = [
     "AgentConfig",
     "OrchestratorConfig",
     "ConfigLoader",
+    "OptimizationConfig",
+    "SimulationConfig",
+    "OutputPathPolicy",
+    "ToolConfig",
+    "ArtifactKind",
+    "ArtifactRecord",
     "ExecutionContext",
     "ContextManager",
+    "EnvironmentMetadata",
     "Message",
     "MessageRole",
     "ToolCall",
@@ -23,6 +41,12 @@ __all__ = [
     "load_netlist",
     "summarize_netlist",
     "MockNgSpiceSimulator",
+    "NgSpiceRunner",
     "SimpleSizingAgent",
     "OptimizationTargets",
+    "ControlDeck",
+    "PromptLibrary",
+    "ToolChainExecutor",
+    "ToolChainParser",
+    "ToolRegistry",
 ]
