@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping, MutableMapping, Protocol, Sequence
 
 from ..config import AgentConfig
-from ..context import ExecutionContext
+from ..context import ArtifactRecord, ExecutionContext
 from ..messaging import Message
 
 
@@ -27,8 +27,13 @@ class AgentResult:
 
     success: bool
     messages: Sequence[Message]
-    artifacts: Mapping[str, str]
+    artifacts: Mapping[str, ArtifactRecord]
     metrics: Mapping[str, float] | None = None
+
+    def serialize_artifacts(self) -> Mapping[str, Mapping[str, str]]:
+        """Helper for CLI/telemetry layers that emit JSON summaries."""
+
+        return {name: record.to_dict() for name, record in self.artifacts.items()}
 
 
 class SupportsAgentIO(Protocol):
@@ -74,6 +79,6 @@ class Agent(ABC):
         return AgentResult(
             success=True,
             messages=context.messages.messages,
-            artifacts={name: str(path) for name, path in context.artifacts.items()},
+            artifacts=dict(context.artifacts),
             metrics=optimized_metrics,
         )

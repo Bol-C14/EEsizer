@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from math import log10
-from typing import MutableMapping
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import tempfile
+from typing import Mapping, MutableMapping, Sequence
 
 from .config import SimulationConfig
 from .netlist import summarize_components
+from .spice import ControlDeck, augment_netlist, parse_measure_log
 
 
 @dataclass(slots=True)
@@ -21,7 +28,12 @@ class MockNgSpiceSimulator:
     def __init__(self, config: SimulationConfig):
         self.config = config
 
-    def run(self, netlist_text: str) -> MutableMapping[str, float]:
+    def run(
+        self,
+        netlist_text: str,
+        deck: ControlDeck | None = None,
+        workdir: Path | None = None,
+    ) -> MutableMapping[str, float]:
         counts = summarize_components(netlist_text)
         mos = counts.get("M", 0)
         resistors = counts.get("R", 0)
@@ -42,4 +54,97 @@ class MockNgSpiceSimulator:
         }
 
 
-__all__ = ["MockNgSpiceSimulator", "SimulationResult"]
+INCLUDE_PATTERN = re.compile(r"^\s*\.include\s+['\"]?(?P<path>[^'\"\s]+)['\"]?", re.IGNORECASE)
+
+
+class NgSpiceRunner:
+    """Invoke a real ngspice binary with generated control decks."""
+
+    def __init__(
+        self,
+        config: SimulationConfig,
+        *,
+        include_paths: Sequence[Path] | None = None,
+        environment: Mapping[str, str] | None = None,
+    ) -> None:
+        self.config = config
+        discovered = list(include_paths or [])
+        default_root = Path(__file__).resolve().parents[1]
+        for candidate in (
+            default_root / "agent_test_gpt",
+            default_root / "agent_test_gemini",
+            default_root / "variation",
+        ):
+            if candidate.exists():
+                discovered.append(candidate)
+        self.include_paths = tuple(Path(path).resolve() for path in discovered)
+        self.environment = dict(environment or {})
+
+    def run(
+        self,
+        netlist_text: str,
+        deck: ControlDeck | None = None,
+        workdir: Path | None = None,
+    ) -> MutableMapping[str, float]:
+        augmented = augment_netlist(netlist_text, deck) if deck else netlist_text
+        temp_dir_obj = None
+        workspace: Path
+        if workdir:
+            workspace = Path(workdir)
+            workspace.mkdir(parents=True, exist_ok=True)
+        else:
+            temp_dir_obj = tempfile.TemporaryDirectory()
+            workspace = Path(temp_dir_obj.name)
+
+        netlist_path = workspace / "circuit.cir"
+        netlist_path.write_text(augmented)
+        self._materialize_includes(augmented, workspace)
+        log_path = workspace / "ngspice.log"
+
+        command = [str(self.config.binary_path), "-b", "-o", str(log_path), str(netlist_path)]
+        env = os.environ.copy()
+        env.update(self.environment)
+        try:
+            subprocess.run(
+                command,
+                cwd=workspace,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=self.config.timeout_seconds,
+                env=env,
+            )
+            log_text = log_path.read_text() if log_path.exists() else ""
+            return parse_measure_log(log_text)
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"ngspice binary not found: {self.config.binary_path}") from exc
+        finally:
+            if temp_dir_obj:
+                temp_dir_obj.cleanup()
+
+    def _materialize_includes(self, text: str, workspace: Path) -> None:
+        for line in text.splitlines():
+            match = INCLUDE_PATTERN.match(line)
+            if not match:
+                continue
+            target = match.group("path")
+            include_path = Path(target)
+            if include_path.is_absolute():
+                continue
+            if (workspace / include_path).exists():
+                continue
+            resolved = self._find_include(include_path)
+            if resolved:
+                destination = workspace / include_path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(resolved, destination)
+
+    def _find_include(self, path: Path) -> Path | None:
+        for base in self.include_paths:
+            candidate = (base / path) if not path.is_absolute() else path
+            if candidate.exists():
+                return candidate
+        return None
+
+
+__all__ = ["MockNgSpiceSimulator", "NgSpiceRunner", "SimulationResult"]
