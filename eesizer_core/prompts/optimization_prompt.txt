@@ -1,0 +1,3 @@
+Optimization guidance for iteration {iteration}:
+Increase gm of the input pair to raise gain while guarding power budget {power_budget:.2f} mW.
+Describe knob adjustments applied to reach target gain {target_gain_db:.2f} dB.

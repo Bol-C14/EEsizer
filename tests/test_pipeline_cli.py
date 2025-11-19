@@ -37,5 +37,10 @@ def test_cli_runs_end_to_end(tmp_path):
     payload = json.loads(result.stdout)
     assert payload["run_id"] == "pytest"
     assert payload["metrics"]["gain_db"] >= 40
+    assert payload["environment"]["corner"] == "tt"
+    assert payload["sim_output"]
+    netlist_artifact = payload["artifacts"]["netlist_copy"]
+    assert netlist_artifact["kind"] == "netlist"
+    assert Path(netlist_artifact["path"]).exists()
     result_file = workdir / "pytest" / "pipeline_result.json"
     assert result_file.exists()
