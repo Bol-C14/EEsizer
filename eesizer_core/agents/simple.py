@@ -1,4 +1,4 @@
-"""Reference implementation of the Agent lifecycle using the mock simulator."""
+"""Reference implementation of the Agent lifecycle using a pluggable simulator."""
 
 from __future__ import annotations
 
@@ -6,24 +6,23 @@ import csv
 import json
 import shutil
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Sequence
 
-from ..config import AgentConfig
+from ..analysis.metrics import (
+    aggregate_measurement_values,
+    merge_metric_sources,
+    standard_measurements,
+    validate_metrics,
+)
+from ..config import AgentConfig, ToolConfig
 from ..context import ArtifactKind, ExecutionContext
 from ..messaging import Message, MessageRole, ToolCall, ToolResult
 from ..netlist import NetlistSummary, summarize_netlist
 from ..prompts import PromptLibrary
-from ..simulation import MockNgSpiceSimulator
-from ..spice import (
-    ControlDeck,
-    ac_simulation,
-    describe_measurements,
-    dc_simulation,
-    measure_gain,
-    measure_power,
-    measure_voltage,
-    tran_simulation,
-)
+from ..providers import LLMProvider, build_provider
+from ..simulation import MockNgSpiceSimulator, NgSpiceRunner
+from ..spice import ControlDeck, ac_simulation, describe_measurements, dc_simulation, tran_simulation
 from ..toolchain import ToolChainExecutor, ToolChainParser, ToolRegistry
 from .base import Agent, AgentMetadata
 
@@ -57,20 +56,33 @@ class SimpleSizingAgent(Agent):
     def __init__(
         self,
         config: AgentConfig,
-        simulator: MockNgSpiceSimulator,
+        simulator: NgSpiceRunner | MockNgSpiceSimulator,
         goal: str,
         targets: OptimizationTargets,
+        *,
+        tool_configs: Mapping[str, ToolConfig] | None = None,
+        recordings: Mapping[str, Mapping[str, str]] | None = None,
+        provider: LLMProvider | None = None,
     ) -> None:
         super().__init__(config)
         self.simulator = simulator
         self.goal = goal
         self.targets = targets
         self._summary: NetlistSummary | None = None
-        self.prompts = PromptLibrary()
+        self.prompts = PromptLibrary(
+            search_paths=self.config.prompt_paths,
+            overrides=self.config.prompt_overrides,
+        )
         self.tool_registry = ToolRegistry()
         self.tool_executor = ToolChainExecutor(self.tool_registry)
         self.tool_parser = ToolChainParser()
         self._register_tooling()
+        self.llm: LLMProvider = provider or build_provider(
+            self.config,
+            tool_configs,
+            recordings=recordings,
+            default_tool_calls=self._default_tool_calls(),
+        )
 
     def build_plan(self, context: ExecutionContext) -> Sequence[Message]:
         """Emit a planning note that assumes ``context.netlist_path`` is set."""
@@ -78,9 +90,22 @@ class SimpleSizingAgent(Agent):
         netlist_text = self._ensure_netlist_loaded(context)
         summary = summarize_netlist(context.netlist_path, netlist_text)
         self._summary = summary
-        template = self.prompts.load("tasks_generation_template")
-        content = template.render(goal=self.goal, netlist_summary=summary.describe())
-        return [Message(role=MessageRole.SYSTEM, content=content, name=self.metadata.name)]
+        template = self.prompts.load("task_decomposition")
+        plan_note = template.render(goal=self.goal, netlist_summary=summary.describe())
+        target_template = self.prompts.load("target_extraction")
+        target_note = target_template.render(
+            goal=self.goal,
+            target_gain_db=self.targets.gain_db,
+            target_power_mw=self.targets.power_mw,
+        )
+        system_message = Message(
+            role=MessageRole.SYSTEM, content=plan_note, name=self.metadata.name
+        )
+        user_message = Message(
+            role=MessageRole.USER, content=target_note, name="target_extraction"
+        )
+        response = self.llm.chat([system_message, user_message], response_name="plan")
+        return [system_message, user_message, response.message]
 
     def select_tools(self, context: ExecutionContext, history: Sequence[Message]) -> Sequence[Message]:
         """Describe the simulator/tooling choices used by downstream stages."""
@@ -100,34 +125,37 @@ class SimpleSizingAgent(Agent):
             {"name": "summarize_simulation_results", "arguments": {}},
         ]
         payload = json.dumps(tool_plan, indent=2)
-        content = (
-            f"Selecting tools for {self.metadata.name}. {summary_desc}\n"
-            "Tool-chain blueprint:\n"
-            f"```json\n{payload}\n```"
+        template = self.prompts.load("simulation_planning")
+        content = template.render(
+            agent_name=self.metadata.name,
+            netlist_summary=summary_desc,
+            tool_blueprint=payload,
         )
-        return [Message(role=MessageRole.USER, content=content, name="tool_selector")]
+        request = Message(role=MessageRole.USER, content=content, name="tool_selector")
+        response = self.llm.chat(
+            [request], response_name="tool_plan", tools=self._tool_schemas()
+        )
+        return [request, response.message]
 
     def run_simulation(self, context: ExecutionContext) -> MutableMapping[str, float]:
         """Run the deterministic simulator and log telemetry in the execution context."""
 
         netlist_text = self._ensure_netlist_loaded(context)
+        sim_dir = self._resolve_dir(context, "simulations")
         state: MutableMapping[str, Any] = {"netlist_text": netlist_text}
         tool_messages = context.messages.messages[-1:]
         parsed_calls = self.tool_parser.parse(tool_messages)
         if not parsed_calls:
-            parsed_calls = [
-                ToolCall(name="prepare_ac_plan", arguments={}, call_id="prepare_ac_plan"),
-                ToolCall(
-                    name="run_ngspice_simulation",
-                    arguments={"deck_ref": "prepare_ac_plan"},
-                    call_id="run_ngspice",
-                ),
-                ToolCall(name="summarize_simulation_results", arguments={}, call_id="summarize"),
-            ]
+            parsed_calls = list(self._default_tool_calls())
         chain = self.tool_executor.run(parsed_calls, context, state=state)
         metrics = dict(chain.state.get("metrics", {}))
-        if not metrics:
-            metrics = self.simulator.run(netlist_text, None, context.working_dir)
+        if metrics:
+            metrics = aggregate_measurement_values(metrics)
+        else:
+            raw_metrics = self.simulator.run(netlist_text, None, sim_dir, artifact_dir=sim_dir)
+            metrics = aggregate_measurement_values(raw_metrics)
+        metrics = self._merge_with_cached_metrics(context, metrics)
+        missing_metrics = self._warn_if_missing_metrics(context, metrics)
         summary_text = chain.summary or describe_measurements(metrics)
         deck = chain.state.get("last_deck")
         if isinstance(deck, ControlDeck):
@@ -147,6 +175,8 @@ class SimpleSizingAgent(Agent):
                 )
             )
         context.metadata["sim_output"] = summary_text
+        if missing_metrics:
+            context.metadata["missing_metrics"] = ",".join(sorted(missing_metrics))
         context.log(
             Message(
                 role=MessageRole.ASSISTANT,
@@ -154,15 +184,16 @@ class SimpleSizingAgent(Agent):
                 name=self.metadata.name,
             )
         )
-        metrics_path = context.working_dir / "simulation_metrics.json"
+        sim_dir = self._resolve_dir(context, "simulations")
+        metrics_path = sim_dir / "simulation_metrics.json"
         metrics_path.write_text(json.dumps(metrics, indent=2))
         context.attach_artifact(
             "simulation_metrics",
             metrics_path,
             kind=ArtifactKind.SIMULATION,
-            description="AC/DC sweep measurements produced by the mock simulator.",
+            description="AC/DC sweep measurements produced by the configured simulator.",
         )
-        summary_path = context.working_dir / "simulation_summary.txt"
+        summary_path = sim_dir / "simulation_summary.txt"
         summary_path.write_text(summary_text + "\n")
         context.attach_artifact(
             "simulation_summary",
@@ -179,6 +210,18 @@ class SimpleSizingAgent(Agent):
         history: list[OptimizationHistoryEntry] = []
         max_iterations = self.config.optimization.max_iterations
         tolerance = self.config.optimization.tolerance_percent
+        strategy_note = self.prompts.load("optimization_strategy").render(
+            target_gain_db=self.targets.gain_db,
+            target_power_mw=self.targets.power_mw,
+            tolerance_percent=tolerance * 100,
+        )
+        context.log(
+            Message(
+                role=MessageRole.SYSTEM,
+                content=strategy_note,
+                name="optimization_strategy",
+            )
+        )
         for iteration in range(1, max_iterations + 1):
             analysis_note = self.prompts.load("analysing_system_prompt").render(
                 iteration=iteration,
@@ -234,7 +277,8 @@ class SimpleSizingAgent(Agent):
         optimized["meets_power"] = float(optimized.get("power_mw", 0.0) <= self.targets.power_mw)
 
         self._emit_target_summary(context)
-        optimized_path = context.working_dir / "optimization_summary.json"
+        artifacts_dir = self._resolve_dir(context, "artifacts")
+        optimized_path = artifacts_dir / "optimization_summary.json"
         optimized_path.write_text(json.dumps(optimized, indent=2))
         context.attach_artifact(
             "optimization_summary",
@@ -242,7 +286,7 @@ class SimpleSizingAgent(Agent):
             kind=ArtifactKind.OPTIMIZATION,
             description="Notebook-style optimization summary containing iterations and flags.",
         )
-        history_csv = context.working_dir / "optimization_history.csv"
+        history_csv = artifacts_dir / "optimization_history.csv"
         with history_csv.open("w", newline="") as handle:
             writer = csv.DictWriter(
                 handle, fieldnames=["iteration", "gain_db", "power_mw", "analysis_note"]
@@ -263,7 +307,7 @@ class SimpleSizingAgent(Agent):
             kind=ArtifactKind.OPTIMIZATION,
             description="Iteration-by-iteration metrics stored as CSV.",
         )
-        history_log = context.working_dir / "optimization_history.log"
+        history_log = artifacts_dir / "optimization_history.log"
         history_text = []
         for entry in history:
             history_text.append(
@@ -277,7 +321,7 @@ class SimpleSizingAgent(Agent):
             kind=ArtifactKind.OPTIMIZATION,
             description="Text log summarizing prompts and adjustments per iteration.",
         )
-        history_pdf = context.working_dir / "optimization_history.pdf"
+        history_pdf = artifacts_dir / "optimization_history.pdf"
         history_pdf.write_text(
             "Notebook-equivalent optimization report\n\n" + "\n\n".join(history_text)
         )
@@ -288,7 +332,7 @@ class SimpleSizingAgent(Agent):
             description="Lightweight PDF placeholder mirroring the notebook artifact list.",
         )
 
-        copied_netlist = context.working_dir / context.netlist_path.name
+        copied_netlist = artifacts_dir / context.netlist_path.name
         if not copied_netlist.exists():
             shutil.copy2(context.netlist_path, copied_netlist)
         context.attach_artifact(
@@ -309,6 +353,49 @@ class SimpleSizingAgent(Agent):
             tolerance_percent=self.config.optimization.tolerance_percent,
         )
         context.log(Message(role=MessageRole.SYSTEM, content=content, name="spec_checker"))
+
+    @staticmethod
+    def _default_tool_calls() -> tuple[ToolCall, ...]:
+        return (
+            ToolCall(name="prepare_ac_plan", arguments={}, call_id="prepare_ac_plan"),
+            ToolCall(
+                name="run_ngspice_simulation",
+                arguments={"deck_ref": "prepare_ac_plan"},
+                call_id="run_ngspice",
+            ),
+            ToolCall(name="summarize_simulation_results", arguments={}, call_id="summarize"),
+        )
+
+    @staticmethod
+    def _tool_schemas() -> tuple[Mapping[str, object], ...]:
+        return (
+            {
+                "name": "prepare_ac_plan",
+                "description": "Builds AC/DC/tran control decks for ngspice",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "deck_name": {"type": "string"},
+                        "output_node": {"type": "string"},
+                        "input_node": {"type": "string"},
+                        "supply_source": {"type": "string"},
+                    },
+                },
+            },
+            {
+                "name": "run_ngspice_simulation",
+                "description": "Executes ngspice for the prepared deck and aggregates metrics",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"deck_ref": {"type": "string"}},
+                },
+            },
+            {
+                "name": "summarize_simulation_results",
+                "description": "Summarizes measurements into a concise log string",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        )
 
     def _register_tooling(self) -> None:
         self.tool_registry.register("prepare_ac_plan", self._tool_prepare_ac_plan)
@@ -348,8 +435,15 @@ class SimpleSizingAgent(Agent):
         netlist_text = state.get("netlist_text")
         if not isinstance(netlist_text, str):
             raise ValueError("Netlist text missing from tool-chain state")
-        metrics = self.simulator.run(netlist_text, deck, context.working_dir)
+        sim_dir = self._resolve_dir(context, "simulations")
+        raw_metrics = self.simulator.run(netlist_text, deck, sim_dir, artifact_dir=sim_dir)
+        metrics = aggregate_measurement_values(raw_metrics)
+        metrics = self._merge_with_cached_metrics(context, metrics)
+        missing = self._warn_if_missing_metrics(context, metrics)
+        state["raw_metrics"] = raw_metrics
         state["metrics"] = metrics
+        if missing:
+            state["missing_metrics"] = missing
         return ToolResult(call_id=call.call_id or "run_ngspice", content=dict(metrics))
 
     def _tool_summarize_results(
@@ -386,21 +480,11 @@ class SimpleSizingAgent(Agent):
                 description="Transient window for THD/power",
             ),
         )
-        measurements = (
-            measure_gain(
-                "gain_db",
-                output_node=output_node,
-                input_node=input_node,
-                description="AC gain measurement",
-            ),
-            measure_voltage(
-                "vout_dc", node=output_node, description="Output DC bias measurement"
-            ),
-            measure_power(
-                "power_mw",
-                supply_source=supply_source,
-                description="Average power consumption in mW",
-            ),
+        measurements = standard_measurements(
+            output_node=output_node,
+            input_node=input_node,
+            supply_source=supply_source,
+            fundamental_hz=float(arguments.get("tran_fundamental", 1e3)),
         )
         return ControlDeck(name=deck_name, directives=directives, measurements=measurements)
 
@@ -430,12 +514,63 @@ class SimpleSizingAgent(Agent):
     def _deck_key(self, identifier: str | None) -> str:
         return f"deck:{identifier or 'default'}"
 
+    def _resolve_dir(self, context: ExecutionContext, category: str) -> Path:
+        """Resolve a run-scoped directory for simulations, artifacts, logs, or plans."""
+
+        if context.paths:
+            mapping = {
+                "simulations": context.paths.simulations,
+                "artifacts": context.paths.artifacts,
+                "logs": context.paths.logs,
+                "plans": context.paths.plans,
+            }
+            target = mapping.get(category)
+            if target:
+                target.mkdir(parents=True, exist_ok=True)
+                return target
+        context.working_dir.mkdir(parents=True, exist_ok=True)
+        return context.working_dir
+
     def _ensure_netlist_loaded(self, context: ExecutionContext) -> str:
         if not context.netlist_path:
             raise ValueError("ExecutionContext.netlist_path must be set before running the agent")
         if not context.netlist_path.exists():
             raise FileNotFoundError(context.netlist_path)
         return context.netlist_path.read_text()
+
+    def _warn_if_missing_metrics(
+        self, context: ExecutionContext, metrics: Mapping[str, float]
+    ) -> Sequence[str]:
+        missing = validate_metrics(metrics)
+        if missing:
+            context.log(
+                Message(
+                    role=MessageRole.SYSTEM,
+                    content=(
+                        "Missing expected measurements: " + ", ".join(sorted(missing))
+                    ),
+                    name="metrics_validator",
+                )
+            )
+        return missing
+
+    def _merge_with_cached_metrics(
+        self, context: ExecutionContext, metrics: Mapping[str, float]
+    ) -> MutableMapping[str, float]:
+        cached: MutableMapping[str, float] = {}
+        cached_blob = context.metadata.get("cached_metrics")
+        if isinstance(cached_blob, Mapping):
+            cached = merge_metric_sources(cached_blob)
+        elif isinstance(cached_blob, str):
+            try:
+                parsed = json.loads(cached_blob)
+                if isinstance(parsed, Mapping):
+                    cached = merge_metric_sources(parsed)
+            except json.JSONDecodeError:
+                cached = {}
+        merged = aggregate_measurement_values(merge_metric_sources(cached, metrics))
+        context.metadata["cached_metrics"] = json.dumps(merged)
+        return merged
 
 
 __all__ = ["SimpleSizingAgent", "OptimizationTargets"]
