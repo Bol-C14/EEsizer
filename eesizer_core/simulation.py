@@ -14,7 +14,7 @@ from typing import Mapping, MutableMapping, Sequence
 
 from .config import SimulationConfig
 from .netlist import summarize_components
-from .spice import ControlDeck, augment_netlist, parse_measure_log
+from .spice import ControlDeck, augment_netlist, load_measurements, parse_measure_log
 
 
 @dataclass(slots=True)
@@ -115,12 +115,31 @@ class NgSpiceRunner:
                 env=env,
             )
             log_text = log_path.read_text() if log_path.exists() else ""
-            return parse_measure_log(log_text)
+            metrics = parse_measure_log(log_text)
+            metrics.update(self._collect_measurement_files(workspace))
+            return metrics
         except FileNotFoundError as exc:
             raise RuntimeError(f"ngspice binary not found: {self.config.binary_path}") from exc
         finally:
             if temp_dir_obj:
                 temp_dir_obj.cleanup()
+
+    def _collect_measurement_files(self, workspace: Path) -> MutableMapping[str, float]:
+        """Load any measurement artifacts ngspice left behind in the workspace."""
+
+        aggregated: MutableMapping[str, float] = {}
+        for candidate in workspace.glob("*.measure"):
+            try:
+                aggregated.update(load_measurements(candidate))
+            except OSError:
+                continue
+        for candidate in (workspace / "measurements.json", workspace / "metrics.json"):
+            if candidate.exists():
+                try:
+                    aggregated.update(load_measurements(candidate))
+                except OSError:
+                    continue
+        return aggregated
 
     def _materialize_includes(self, text: str, workspace: Path) -> None:
         for line in text.splitlines():
