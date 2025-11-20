@@ -1,4 +1,0 @@
-Extract the numerical targets from the specification description.
-Return a short checklist of gain, bandwidth, and power constraints referenced in the notebook.
-Design goal: {goal}
-Existing targets: gain {target_gain_db:.2f} dB, power {target_power_mw:.2f} mW

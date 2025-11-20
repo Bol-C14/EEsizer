@@ -8,7 +8,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, MutableMapping, Optional
 
-from .config import RunPathLayout
 from .messaging import Message, MessageBundle
 
 
@@ -89,7 +88,6 @@ class ExecutionContext:
     run_id: str
     working_dir: Path
     config_name: str
-    paths: RunPathLayout | None = None
     messages: MessageBundle = field(default_factory=lambda: MessageBundle(messages=[]))
     metadata: MutableMapping[str, str] = field(default_factory=dict)
     artifacts: MutableMapping[str, ArtifactRecord] = field(default_factory=dict)
@@ -119,10 +117,6 @@ class ExecutionContext:
             description=description,
             metadata=dict(metadata or {}),
         )
-        try:
-            record.metadata.setdefault("relative_path", str(path.relative_to(self.working_dir)))
-        except ValueError:
-            pass
         self.artifacts[name] = record
         return record
 
@@ -160,7 +154,6 @@ class ContextManager(AbstractContextManager[ExecutionContext]):
         create_dirs: bool = True,
         pre_run_hook: Callable[[ExecutionContext], None] | None = None,
         post_run_hook: Callable[[ExecutionContext], None] | None = None,
-        path_layout: RunPathLayout | None = None,
     ):
         self.run_id = run_id
         self.base_dir = base_dir
@@ -169,25 +162,15 @@ class ContextManager(AbstractContextManager[ExecutionContext]):
         self._context: ExecutionContext | None = None
         self._pre_run_hook = pre_run_hook
         self._post_run_hook = post_run_hook
-        self._path_layout = path_layout
 
     def __enter__(self) -> ExecutionContext:
-        workdir = self._path_layout.run_dir if self._path_layout else self.base_dir / self.run_id
+        workdir = self.base_dir / self.run_id
         if self.create_dirs:
             workdir.mkdir(parents=True, exist_ok=True)
-            if self._path_layout:
-                for child in (
-                    self._path_layout.artifacts,
-                    self._path_layout.logs,
-                    self._path_layout.simulations,
-                    self._path_layout.plans,
-                ):
-                    child.mkdir(parents=True, exist_ok=True)
         self._context = ExecutionContext(
             run_id=self.run_id,
             working_dir=workdir,
             config_name=self.config_name,
-            paths=self._path_layout,
         )
         if self._pre_run_hook:
             self._pre_run_hook(self._context)

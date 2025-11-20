@@ -1,8 +1,0 @@
-Draft the simulation and measurement plan before tool calls.
-Reference the provided tool-chain blueprint and highlight AC, DC, TRAN coverage expected by the notebook.
-Agent: {agent_name}
-Netlist summary: {netlist_summary}
-Tool-chain blueprint:
-```json
-{tool_blueprint}
-```
