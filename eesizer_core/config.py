@@ -8,22 +8,6 @@ from typing import Any, Mapping, MutableMapping, Sequence
 
 
 @dataclass(slots=True)
-class RunPathLayout:
-    """Resolved set of paths for a single run.
-
-    The layout nests artifacts under a run-specific directory and further under a
-    netlist identifier so that notebook outputs (e.g. ``output/90nm/netlist_cs_o3``)
-    are easy to mirror and compare.
-    """
-
-    run_dir: Path
-    artifacts: Path
-    logs: Path
-    simulations: Path
-    plans: Path
-
-
-@dataclass(slots=True)
 class OutputPathPolicy:
     """Describes how artifacts, logs, and plans should be organized on disk."""
 
@@ -56,25 +40,6 @@ class OutputPathPolicy:
         for child in (self.artifacts_dir, self.logs_dir, self.simulations_dir, self.plans_dir):
             (run_dir / child).mkdir(parents=True, exist_ok=True)
         return run_dir
-
-    def build_layout(self, run_id: str, *, netlist_stem: str | None = None) -> RunPathLayout:
-        """Create a nested directory layout for a specific run/netlist."""
-
-        run_dir = self.ensure_run_structure(run_id)
-        suffix = netlist_stem or run_id
-
-        def ensure_child(child: str) -> Path:
-            path = run_dir / child / suffix
-            path.mkdir(parents=True, exist_ok=True)
-            return path
-
-        return RunPathLayout(
-            run_dir=run_dir,
-            artifacts=ensure_child(self.artifacts_dir),
-            logs=ensure_child(self.logs_dir),
-            simulations=ensure_child(self.simulations_dir),
-            plans=ensure_child(self.plans_dir),
-        )
 
     def to_dict(self) -> MutableMapping[str, Any]:
         return {
@@ -169,8 +134,6 @@ class AgentConfig:
     tools: Sequence[str] = field(default_factory=tuple)
     description: str | None = None
     output_paths: OutputPathPolicy | None = None
-    prompt_overrides: MutableMapping[str, str] = field(default_factory=dict)
-    prompt_paths: Sequence[Path] = field(default_factory=tuple)
     extra: MutableMapping[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
@@ -193,8 +156,6 @@ class AgentConfig:
             "simulation": self.simulation.to_dict(),
             "optimization": self.optimization.to_dict(),
             "tools": list(self.tools),
-            "prompt_overrides": dict(self.prompt_overrides),
-            "prompt_paths": [str(path) for path in self.prompt_paths],
             "extra": dict(self.extra),
         }
         if self.description:
@@ -314,8 +275,6 @@ class ConfigLoader:
             tools: Sequence[str] = (tools_field,)
         else:
             tools = tuple(tools_field)
-        prompt_paths_field = payload.get("prompt_paths", ())
-        prompt_paths: Sequence[Path] = tuple(Path(p) for p in prompt_paths_field)
         agent = AgentConfig(
             name=name,
             model=payload.get("model", self.raw.get("default_model", "gpt-4o")),
@@ -324,8 +283,6 @@ class ConfigLoader:
             tools=tools,
             description=payload.get("description"),
             output_paths=output_paths,
-            prompt_overrides=dict(payload.get("prompt_overrides", {})),
-            prompt_paths=prompt_paths,
             extra={
                 k: v
                 for k, v in payload.items()
@@ -337,8 +294,6 @@ class ConfigLoader:
                     "tools",
                     "description",
                     "output_paths",
-                    "prompt_overrides",
-                    "prompt_paths",
                 }
             },
         )
@@ -374,7 +329,6 @@ __all__ = [
     "ConfigLoader",
     "OptimizationConfig",
     "OrchestratorConfig",
-    "RunPathLayout",
     "OutputPathPolicy",
     "SimulationConfig",
     "ToolConfig",

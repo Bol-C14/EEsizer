@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from pathlib import Path
@@ -53,17 +52,3 @@ def test_simple_agent_run(tmp_path):
     assert Path(result.artifacts["netlist_copy"].path).exists()
     assert result.artifacts["simulation_summary"].kind == ArtifactKind.SIMULATION
     assert Path(result.artifacts["optimization_history_csv"].path).exists()
-
-
-def test_simple_agent_uses_cached_metrics(tmp_path):
-    netlist_path = tmp_path / "ota.cir"
-    netlist_path.write_text(TEST_NETLIST)
-    agent = build_agent(tmp_path)
-
-    with ContextManager(run_id="test", base_dir=tmp_path, config_name="test") as ctx:
-        ctx.netlist_path = netlist_path
-        ctx.metadata["cached_metrics"] = json.dumps({"cmrr_db": 72.5})
-        result = agent.run(ctx)
-
-    assert result.success
-    assert result.metrics["cmrr_db"] == 72.5

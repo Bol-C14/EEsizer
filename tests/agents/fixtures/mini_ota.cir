@@ -1,9 +1,0 @@
-* mini differential pair for notebook-parity tests
-M1 out in tail 0 nch W=1u L=90n
-M2 out in vdd vdd pch W=2u L=90n
-R1 vdd out 2k
-C1 out 0 2p
-Vin in 0 ac 1
-Vdd vdd 0 1.8
-Vtail tail 0 0.2
-.end

@@ -49,8 +49,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "agents": {
         "simple": {
             "model": "gpt-4o-mini",
-            "tools": ["ngspice", "mock-ngspice"],
-            "description": "Reference agent wiring together planning, simulation, and optimization.",
+            "tools": ["mock-ngspice"],
+            "description": "Reference agent wiring together planning, mock simulation, and optimization.",
         }
     },
 }
@@ -132,8 +132,7 @@ def main(argv: list[str] | None = None) -> int:
 
     run_id = args.run_id or uuid.uuid4().hex[:8]
     output_policy = agent_config.resolve_output_paths(orchestrator_config.output_paths)
-    layout = output_policy.build_layout(run_id, netlist_stem=args.netlist.stem)
-    run_dir = layout.run_dir
+    run_dir = output_policy.ensure_run_structure(run_id)
     working_root = output_policy.root
 
     def _pre_run(ctx):
@@ -148,7 +147,6 @@ def main(argv: list[str] | None = None) -> int:
         config_name="cli",
         pre_run_hook=_pre_run,
         post_run_hook=_post_run,
-        path_layout=layout,
     ) as ctx:
         ctx.netlist_path = args.netlist
         ctx.metadata["goal"] = args.goal
