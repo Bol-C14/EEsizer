@@ -63,6 +63,7 @@ class SimpleSizingAgent(Agent):
         tool_configs: Mapping[str, ToolConfig] | None = None,
         recordings: Mapping[str, Mapping[str, str]] | None = None,
         provider: LLMProvider | None = None,
+        force_live_llm: bool | None = None,
     ) -> None:
         super().__init__(config)
         self.simulator = simulator
@@ -82,6 +83,7 @@ class SimpleSizingAgent(Agent):
             tool_configs,
             recordings=recordings,
             default_tool_calls=self._default_tool_calls(),
+            force_live=force_live_llm,
         )
 
     def build_plan(self, context: ExecutionContext) -> Sequence[Message]:

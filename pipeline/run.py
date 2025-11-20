@@ -139,6 +139,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=27.0,
         help="Ambient temperature in Celsius",
     )
+    parser.add_argument(
+        "--live-llm",
+        action="store_true",
+        help="Force live LLM calls when credentials are configured (defaults to recorded fixtures).",
+    )
     return parser.parse_args(argv)
 
 
@@ -210,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         goal=args.goal,
         targets=targets,
         tool_configs=orchestrator_config.tools,
+        force_live_llm=args.live_llm,
     )
 
     run_id = args.run_id or uuid.uuid4().hex[:8]

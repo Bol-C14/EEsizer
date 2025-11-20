@@ -210,9 +210,29 @@ def build_provider(
     default_tool_calls: Sequence[ToolCall] | None = None,
     force_live: bool | None = None,
 ) -> LLMProvider:
-    """Select a provider based on tool kind and environment flags."""
+    """Select a provider based on tool kind and environment flags.
 
-    live_flag = force_live if force_live is not None else bool(os.getenv("EESIZER_LIVE_LLM"))
+    Live calls are enabled when any of the following are true:
+    - ``force_live`` is explicitly provided
+    - ``EESIZER_LIVE_LLM`` is set to a truthy value
+    - an API key is present for at least one referenced tool
+    """
+
+    def _env_truthy() -> bool:
+        raw = os.getenv("EESIZER_LIVE_LLM")
+        if raw is None:
+            return False
+        return raw.strip().lower() not in {"", "0", "false", "no"}
+
+    def _has_credentials(tool_map: Mapping[str, ToolConfig]) -> bool:
+        for tool_name in agent_config.tools:
+            cfg = tool_map.get(tool_name)
+            if cfg and cfg.credentials.get("api_key"):
+                return True
+        return False
+
+    tool_map = tools or {}
+    live_flag = force_live if force_live is not None else _env_truthy() or _has_credentials(tool_map)
     if not live_flag:
         return RecordedProvider(
             agent_config.name,
@@ -220,7 +240,6 @@ def build_provider(
             default_tool_calls=default_tool_calls,
         )
 
-    tool_map = tools or {}
     for tool_name in agent_config.tools:
         cfg = tool_map.get(tool_name)
         if not cfg:

@@ -52,6 +52,7 @@ class Gpt5MiniAgent(SimpleSizingAgent):
         tool_configs=None,
         recordings=None,
         provider=None,
+        force_live_llm: bool | None = None,
     ) -> None:
         super().__init__(
             config,
@@ -61,6 +62,7 @@ class Gpt5MiniAgent(SimpleSizingAgent):
             tool_configs=tool_configs,
             recordings=recordings,
             provider=provider,
+            force_live_llm=force_live_llm,
         )
 
 
