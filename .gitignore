@@ -23,3 +23,31 @@ __pycache__/
 # Ignore environment files
 .env
 venv
+.venv/
+env/
+
+# Python test / coverage
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IPython/Jupyter
+.ipynb_checkpoints/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Misc
+.DS_Store
+*.swp
+*~
+.cache/
+
+# Ignore editor swap/backup files
+*.swo
+*.swp
