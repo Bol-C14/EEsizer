@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +23,14 @@ from ..netlist import NetlistSummary, summarize_netlist
 from ..prompts import PromptLibrary
 from ..providers import LLMProvider, build_provider
 from ..simulation import MockNgSpiceSimulator, NgSpiceRunner
-from ..spice import ControlDeck, ac_simulation, describe_measurements, dc_simulation, tran_simulation
+from ..spice import (
+    ControlDeck,
+    WaveformExport,
+    ac_simulation,
+    describe_measurements,
+    dc_simulation,
+    tran_simulation,
+)
 from ..toolchain import ToolChainExecutor, ToolChainParser, ToolRegistry
 from .base import Agent, AgentMetadata
 
@@ -409,7 +417,8 @@ class SimpleSizingAgent(Agent):
     def _tool_prepare_ac_plan(
         self, call: ToolCall, context: ExecutionContext, state: MutableMapping[str, Any]
     ) -> ToolResult:
-        deck = self._build_default_deck(call.arguments)
+        netlist_text = state.get("netlist_text")
+        deck = self._build_default_deck(call.arguments, netlist_text=netlist_text)
         deck_key = self._deck_key(call.call_id or call.name)
         state[deck_key] = deck
         state[self._deck_key(call.name)] = deck
@@ -433,7 +442,7 @@ class SimpleSizingAgent(Agent):
         if deck is None:
             deck = state.get("last_deck")
         if deck is None:
-            deck = self._build_default_deck({})
+            deck = self._build_default_deck({}, netlist_text=state.get("netlist_text"))
         netlist_text = state.get("netlist_text")
         if not isinstance(netlist_text, str):
             raise ValueError("Netlist text missing from tool-chain state")
@@ -456,14 +465,37 @@ class SimpleSizingAgent(Agent):
         state["simulation_summary"] = summary
         return ToolResult(call_id=call.call_id or "summary", content={"summary": summary})
 
-    def _build_default_deck(self, arguments: Mapping[str, Any]) -> ControlDeck:
+    def _build_default_deck(
+        self, arguments: Mapping[str, Any], *, netlist_text: str | None = None
+    ) -> ControlDeck:
         deck_name = str(arguments.get("deck_name", "ota_ac_combo"))
-        output_node = str(arguments.get("output_node", "out"))
-        input_node = str(arguments.get("input_node", "in"))
-        supply_source = str(arguments.get("supply_source", "vdd"))
+        output_node = self._resolve_identifier(
+            arguments.get("output_node"),
+            netlist_text,
+            ("out", "vout", "outp", "vout+"),
+            default="out",
+        )
+        input_node = self._resolve_identifier(
+            arguments.get("input_node"),
+            netlist_text,
+            ("diffin", "vin", "inp", "in", "vinp", "vip", "in1"),
+            default="in",
+        )
+        supply_source = self._resolve_identifier(
+            arguments.get("supply_source"),
+            netlist_text,
+            ("vdd", "vcc", "vdd!"),
+            default="vdd",
+        )
+        dc_source = self._resolve_identifier(
+            arguments.get("dc_source"),
+            netlist_text,
+            ("vid", "vin", "vinp"),
+            default="VIN",
+        )
         directives = (
             dc_simulation(
-                source=str(arguments.get("dc_source", "VIN")),
+                source=dc_source,
                 start=float(arguments.get("dc_start", -0.1)),
                 stop=float(arguments.get("dc_stop", 0.1)),
                 step=float(arguments.get("dc_step", 0.01)),
@@ -482,13 +514,80 @@ class SimpleSizingAgent(Agent):
                 description="Transient window for THD/power",
             ),
         )
+        save_targets = {
+            f"V({output_node})",
+            f"V({input_node})",
+            f"V({supply_source})",
+            f"I({supply_source})",
+        }
+        waveform_exports = (
+            WaveformExport(
+                filename="output_tran.dat",
+                vectors=(
+                    "time",
+                    f"V({output_node})",
+                    f"V({input_node})",
+                    f"V({supply_source})",
+                    f"I({supply_source})",
+                ),
+                plot="tran1",
+                description="Transient waveforms for THD/power derivation",
+            ),
+            WaveformExport(
+                filename="output_ac.dat",
+                vectors=(
+                    "frequency",
+                    f"vdb({output_node})",
+                ),
+                plot="ac1",
+                description="AC magnitude for gain/bandwidth derivation",
+            ),
+        )
         measurements = standard_measurements(
             output_node=output_node,
             input_node=input_node,
             supply_source=supply_source,
             fundamental_hz=float(arguments.get("tran_fundamental", 1e3)),
         )
-        return ControlDeck(name=deck_name, directives=directives, measurements=measurements)
+        return ControlDeck(
+            name=deck_name,
+            directives=directives,
+            measurements=measurements,
+            saves=tuple(sorted(save_targets)),
+            waveform_exports=waveform_exports,
+        )
+
+    def _resolve_identifier(
+        self,
+        provided: object,
+        netlist_text: str | None,
+        fallbacks: Sequence[str],
+        *,
+        default: str,
+    ) -> str:
+        candidates: list[str] = []
+        if isinstance(provided, str) and provided.strip():
+            candidates.append(provided.strip())
+        candidates.extend(fallbacks)
+        guess = self._guess_identifier(netlist_text, tuple(candidates))
+        if guess:
+            return guess
+        if candidates:
+            return candidates[0]
+        return default
+
+    @staticmethod
+    def _guess_identifier(netlist_text: str | None, candidates: Sequence[str]) -> str | None:
+        if not isinstance(netlist_text, str):
+            return None
+        for candidate in candidates:
+            if not candidate:
+                continue
+            pattern = re.compile(rf"\b{re.escape(candidate)}\b", re.IGNORECASE)
+            match = pattern.search(netlist_text)
+            if match:
+                return match.group(0)
+        return None
 
     def _nudge_metrics(self, metrics: Mapping[str, float]) -> MutableMapping[str, float]:
         updated = dict(metrics)

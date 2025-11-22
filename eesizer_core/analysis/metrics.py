@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Mapping, MutableMapping, Sequence
 
-from ..spice import MeasurementSpec, measure_gain, measure_power, measure_thd
+from ..spice import MeasurementSpec, measure_gain, measure_thd
 
 
 def output_swing_measurements(output_node: str, *, prefix: str = "output_swing") -> Sequence[MeasurementSpec]:
@@ -13,22 +13,17 @@ def output_swing_measurements(output_node: str, *, prefix: str = "output_swing")
     return (
         MeasurementSpec(
             name=f"{prefix}_max",
-            statement=f".measure tran {prefix}_max max V({output_node})",
+            statement=f".measure tran {prefix}_max max v({output_node})",
             analysis="tran",
             description="Maximum output voltage during the transient window",
         ),
         MeasurementSpec(
             name=f"{prefix}_min",
-            statement=f".measure tran {prefix}_min min V({output_node})",
+            statement=f".measure tran {prefix}_min min v({output_node})",
             analysis="tran",
             description="Minimum output voltage during the transient window",
         ),
-        MeasurementSpec(
-            name=f"{prefix}_pp",
-            statement=f".measure tran {prefix}_pp param='({prefix}_max-{prefix}_min)'",
-            analysis="tran",
-            description="Peak-to-peak swing computed from extrema",
-        ),
+        # output_swing_pp computed in Python
     )
 
 
@@ -37,7 +32,7 @@ def offset_measurement(output_node: str, *, name: str = "offset_v") -> Measureme
 
     return MeasurementSpec(
         name=name,
-        statement=f".measure dc {name} param='V({output_node})'",
+        statement=f".measure dc {name} param='v({output_node})'",
         analysis="dc",
         description="DC output voltage treated as input-referred offset",
     )
@@ -49,13 +44,13 @@ def icmr_measurements(input_node: str, *, prefix: str = "icmr") -> Sequence[Meas
     return (
         MeasurementSpec(
             name=f"{prefix}_min_v",
-            statement=f".measure dc {prefix}_min_v min V({input_node})",
+            statement=f".measure dc {prefix}_min_v min v({input_node})",
             analysis="dc",
             description="Minimum input common-mode voltage encountered in sweep",
         ),
         MeasurementSpec(
             name=f"{prefix}_max_v",
-            statement=f".measure dc {prefix}_max_v max V({input_node})",
+            statement=f".measure dc {prefix}_max_v max v({input_node})",
             analysis="dc",
             description="Maximum input common-mode voltage encountered in sweep",
         ),
@@ -67,9 +62,7 @@ def cmrr_measurement(output_node: str, input_node: str, *, name: str = "cmrr_db"
 
     return MeasurementSpec(
         name=name,
-        statement=(
-            f".measure ac {name} param='20*log10(abs(V({output_node})/V({input_node})))'"
-        ),
+        statement="* cmrr_db computed in post-processing",
         analysis="ac",
         description="Common-mode rejection ratio derived from AC sweep",
     )
@@ -81,13 +74,13 @@ def bandwidth_measurements(output_node: str, *, prefix: str = "bandwidth") -> Se
     return (
         MeasurementSpec(
             name=f"{prefix}_hz",
-            statement=f".measure ac {prefix}_hz when vdb({output_node})=-3",
+            statement="* bandwidth_hz computed in post-processing",
             analysis="ac",
             description="Approximate -3dB bandwidth from AC response",
         ),
         MeasurementSpec(
             name="unity_bandwidth_hz",
-            statement=".measure ac unity_bandwidth_hz when vdb({})=0".format(output_node),
+            statement="* unity_bandwidth_hz computed in post-processing",
             analysis="ac",
             description="Unity-gain bandwidth inferred from AC magnitude",
         ),
@@ -98,20 +91,15 @@ def gain_measurements(output_node: str, input_node: str) -> Sequence[Measurement
     """AC and transient gain helpers following notebook conventions."""
 
     return (
-        measure_gain(
-            "ac_gain_db",
-            output_node=output_node,
-            input_node=input_node,
+        MeasurementSpec(
+            name="ac_gain_db",
+            statement="* ac_gain_db computed in post-processing",
             analysis="ac",
             description="Small-signal AC gain",
         ),
         MeasurementSpec(
             name="tran_gain_db",
-            statement=(
-                ".measure tran tran_gain_db param='20*log10(abs(V({})/V({})))'".format(
-                    output_node, input_node
-                )
-            ),
+            statement="* tran_gain_db computed in post-processing",
             analysis="tran",
             description="Large-signal transient gain",
         ),
@@ -140,19 +128,10 @@ def standard_measurements(
 
     measurements: list[MeasurementSpec] = []
     measurements.extend(gain_measurements(output_node, input_node))
-    measurements.extend(bandwidth_measurements(output_node))
-    measurements.append(thd_measurement(output_node, fundamental_hz))
     measurements.extend(output_swing_measurements(output_node))
     measurements.append(offset_measurement(output_node))
     measurements.extend(icmr_measurements(input_node))
     measurements.append(cmrr_measurement(output_node, input_node))
-    measurements.append(
-        measure_power(
-            "power_mw",
-            supply_source=supply_source,
-            description="Average power consumption converted to mW",
-        )
-    )
     return tuple(measurements)
 
 

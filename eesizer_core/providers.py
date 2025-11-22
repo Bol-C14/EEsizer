@@ -91,7 +91,23 @@ class OpenAIProvider:
             "messages": MessageBundle.from_iterable(messages).as_dict(),
         }
         if tools:
-            payload["tools"] = list(tools)
+            # Normalize tool descriptors into the shape expected by the
+            # OpenAI-style "tools" parameter. Accept either a already
+            # wrapped descriptor (with "type"/"function") or the
+            # simplified schema used in agents (name/description/parameters).
+            normalized: list[Mapping[str, object]] = []
+            for t in tools:
+                if not isinstance(t, Mapping):
+                    continue
+                if "type" in t and ("function" in t or "name" in t):
+                    normalized.append(dict(t))
+                    continue
+                # expected simplified shape: {name, description, parameters}
+                name = t.get("name")
+                desc = t.get("description", "")
+                params = t.get("parameters", {})
+                normalized.append({"type": "function", "function": {"name": name, "description": desc, "parameters": params}})
+            payload["tools"] = normalized
         completion = self.client.chat.completions.create(**payload)
         choice = completion.choices[0].message
         tool_calls: list[ToolCall] = []

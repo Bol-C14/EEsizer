@@ -14,7 +14,13 @@ from typing import Iterable, Mapping, MutableMapping, Sequence
 
 from .config import SimulationConfig
 from .netlist import summarize_components
-from .spice import ControlDeck, augment_netlist, load_measurements, parse_measure_log
+from .spice import (
+    ControlDeck,
+    WaveformExport,
+    augment_netlist,
+    load_measurements,
+    parse_measure_log,
+)
 
 
 @dataclass(slots=True)
@@ -103,7 +109,7 @@ class NgSpiceRunner:
         self._materialize_includes(augmented, workspace)
         log_path = workspace / "ngspice.log"
 
-        command = [str(self.config.binary_path), "-b", "-o", str(log_path), str(netlist_path)]
+        command = [str(self.config.binary_path), "-b", "-o", log_path.name, netlist_path.name]
         env = os.environ.copy()
         env.update(self.environment)
         try:
@@ -119,11 +125,18 @@ class NgSpiceRunner:
             log_text = log_path.read_text() if log_path.exists() else ""
             metrics = parse_measure_log(log_text)
             metrics.update(self._collect_measurement_files(workspace))
-            wave_metrics, artifacts = self._collect_waveform_metrics(workspace)
+            wave_metrics, artifacts = self._collect_waveform_metrics(workspace, deck)
             metrics.update(wave_metrics)
             if artifact_dir:
                 self._persist_artifacts(artifacts, artifact_dir)
             return metrics
+        except subprocess.CalledProcessError as exc:
+            print(f"ngspice failed with exit code {exc.returncode}")
+            print(f"STDOUT:\n{exc.stdout}")
+            print(f"STDERR:\n{exc.stderr}")
+            if log_path.exists():
+                print(f"LOG:\n{log_path.read_text()}")
+            raise RuntimeError(f"ngspice binary failed: {self.config.binary_path}") from exc
         except FileNotFoundError as exc:
             raise RuntimeError(f"ngspice binary not found: {self.config.binary_path}") from exc
         finally:
@@ -148,26 +161,65 @@ class NgSpiceRunner:
         return aggregated
 
     def _collect_waveform_metrics(
-        self, workspace: Path
+        self, workspace: Path, deck: ControlDeck | None = None
     ) -> tuple[MutableMapping[str, float], Sequence[Path]]:
-        """Derive additional metrics from waveform/OP artifacts that ngspice writes.
-
-        The notebook flow emits transient/AC datasets (e.g., ``output_tran.dat``) and
-        Vgs/Vth checks (``vgscheck.txt``); this method mirrors that behavior by parsing
-        any ``*.dat`` waveforms for swing/THD estimates and capturing Vgs-Vth margin
-        violations from the check files.
-        """
+        """Derive metrics from waveform dumps plus any Vgs/Vth check files."""
 
         metrics: MutableMapping[str, float] = {}
         artifacts: list[Path] = []
-        for candidate in workspace.glob("*.dat"):
+        waveforms: MutableMapping[str, Sequence[float]] = {}
+        exports = tuple(deck.waveform_exports) if isinstance(deck, ControlDeck) else ()
+        processed_dat: set[str] = set()
+        for export in exports:
+            candidate = workspace / export.filename
+            if not candidate.exists():
+                continue
             artifacts.append(candidate)
-            waveforms = self._parse_ascii_waveform(candidate)
-            metrics.update(self._derive_waveform_metrics(waveforms))
+            processed_dat.add(candidate.name)
+            parsed = self._parse_wrdata_file(candidate, export.vectors)
+            for name, values in parsed.items():
+                if not values:
+                    continue
+                waveforms.setdefault(name.lower(), values)
+        if not waveforms:
+            for candidate in workspace.glob("*.dat"):
+                if candidate.name in processed_dat:
+                    continue
+                artifacts.append(candidate)
+                parsed = self._parse_ascii_waveform(candidate)
+                for name, values in parsed.items():
+                    if not values or name in waveforms:
+                        continue
+                    waveforms[name] = values
+        metrics.update(self._derive_waveform_metrics(waveforms))
         for candidate in workspace.glob("vgscheck*.txt"):
             artifacts.append(candidate)
             metrics.update(self._parse_vgs_checks(candidate))
         return metrics, tuple(artifacts)
+
+    def _parse_wrdata_file(
+        self, path: Path, vectors: Sequence[str]
+    ) -> Mapping[str, Sequence[float]]:
+        columns: dict[str, list[float]] = {vector: [] for vector in vectors}
+        expected = len(vectors) * 2
+        try:
+            lines = path.read_text().splitlines()
+        except OSError:
+            return columns
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            parts = stripped.split()
+            if len(parts) < expected:
+                continue
+            try:
+                real_values = [float(parts[idx]) for idx in range(0, expected, 2)]
+            except (TypeError, ValueError):
+                continue
+            for vector, value in zip(vectors, real_values):
+                columns[vector].append(value)
+        return columns
 
     def _persist_artifacts(self, artifacts: Iterable[Path], target_dir: Path) -> None:
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -188,14 +240,14 @@ class NgSpiceRunner:
         if not rows:
             return {}
         header = rows[0].split()
-        columns: dict[str, list[float]] = {name: [] for name in header}
+        columns: dict[str, list[float]] = {name.lower(): [] for name in header}
         for row in rows[1:]:
             values = row.split()
             if len(values) != len(header):
                 continue
             for name, value in zip(header, values):
                 try:
-                    columns[name].append(float(value))
+                    columns[name.lower()].append(float(value))
                 except (TypeError, ValueError):
                     continue
         return columns
@@ -208,11 +260,9 @@ class NgSpiceRunner:
             return metrics
 
         def first_matching(keys: Sequence[str]) -> Sequence[float] | None:
-            for candidate in keys:
+            lowered = tuple(key.lower() for key in keys)
+            for candidate in lowered:
                 if candidate in waveforms:
-                    return waveforms[candidate]
-            for candidate in waveforms:
-                if candidate.lower() in keys:
                     return waveforms[candidate]
             return None
 
@@ -236,6 +286,51 @@ class NgSpiceRunner:
                 metrics.setdefault(
                     "vgs_vth_violations", float(sum(1 for margin in margins if margin < 0))
                 )
+
+        supply_current_key = next((key for key in waveforms if key.startswith("i(")), None)
+        supply_voltage_wave: Sequence[float] | None = None
+        supply_current_wave: Sequence[float] | None = None
+        if supply_current_key:
+            supply_current_wave = waveforms[supply_current_key]
+            branch = supply_current_key[2:-1]
+            candidate_keys = [f"v({branch})", branch]
+            for candidate in candidate_keys:
+                key = candidate.lower()
+                if key in waveforms:
+                    supply_voltage_wave = waveforms[key]
+                    break
+        if (
+            supply_voltage_wave
+            and supply_current_wave
+            and len(supply_voltage_wave) == len(supply_current_wave)
+            and supply_voltage_wave
+        ):
+            samples = [-v * i * 1e3 for v, i in zip(supply_voltage_wave, supply_current_wave)]
+            if samples:
+                metrics.setdefault("power_mw", float(sum(samples) / len(samples)))
+
+        # AC Analysis Metrics
+        freq_wave = waveforms.get("frequency")
+        if freq_wave:
+            vdb_key = next((k for k in waveforms if k.startswith("vdb(")), None)
+            if vdb_key:
+                vdb_wave = waveforms[vdb_key]
+                if len(vdb_wave) == len(freq_wave) and vdb_wave:
+                    max_gain = max(vdb_wave)
+                    metrics.setdefault("ac_gain_db", max_gain)
+                    
+                    # Bandwidth (-3dB)
+                    target_3db = max_gain - 3.0
+                    for f, g in zip(freq_wave, vdb_wave):
+                        if g <= target_3db:
+                            metrics.setdefault("bandwidth_hz", f)
+                            break
+                    
+                    # Unity Bandwidth (0dB)
+                    for f, g in zip(freq_wave, vdb_wave):
+                        if g <= 0.0:
+                            metrics.setdefault("unity_bandwidth_hz", f)
+                            break
 
         return metrics
 
