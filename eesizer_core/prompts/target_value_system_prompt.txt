@@ -1,0 +1,6 @@
+You are validating whether proposed measurements satisfy the target specs.
+Design goal: {goal}
+Target gain: {target_gain_db:.2f} dB
+Target power: {target_power_mw:.2f} mW
+
+Summarize if the metrics meet tolerance {tolerance_percent:.1%}.

@@ -1,0 +1,5 @@
+Outline the optimization cadence for this circuit.
+Include iteration budgets, when to stop, and how to trade off gain vs. power using the measured metrics.
+Target gain: {target_gain_db:.2f} dB
+Target power: {target_power_mw:.2f} mW
+Tolerance: {tolerance_percent:.1f}%

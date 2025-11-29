@@ -1,0 +1,3 @@
+Sizing decision log for iteration {iteration}:
+Summarize updated device widths, capacitor values, and bias tweaks inferred from the optimization narrative.
+Document how the ngspice rerun impacted gain/power deltas of {gain_delta:.2f} dB and {power_delta:.2f} mW.
