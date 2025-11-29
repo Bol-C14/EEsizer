@@ -22,7 +22,52 @@ __pycache__/
 
 # Ignore environment files
 .env
-.venv
-venv/
-venv/*
+venv
+.venv/
+env/
+
+# Python test / coverage
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IPython/Jupyter
+.ipynb_checkpoints/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Misc
+.DS_Store
+*.swp
+*~
+.cache/
+
+# Ignore editor swap/backup files
+*.swo
+*.swp
+
+# Legacy notebook and temporary simulation artifacts
+legacy_notebook/
+output/pipeline/
 output/
+
+# Temporary SPICE outputs and tmp files
+tmp_*.cir
+tmp_*.out
+tmp_*.err
+*.measure
+*.dat
+
+# Keep local config but avoid committing API keys
+tmp_openai_config.json
+
+# Ignore virtual environment used in this workspace
+.venv/
+venv/
+env/

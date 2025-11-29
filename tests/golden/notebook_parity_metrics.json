@@ -1,0 +1,8 @@
+{
+  "gain_db": 55.0,
+  "power_mw": 4.75,
+  "bandwidth_hz": 990000.0,
+  "iterations": 1.0,
+  "meets_gain": 1.0,
+  "meets_power": 1.0
+}
