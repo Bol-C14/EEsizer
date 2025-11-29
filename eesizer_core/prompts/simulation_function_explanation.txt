@@ -1,5 +1,0 @@
-Explain how the selected simulator, measurement directives, and control deck will execute.
-Reference deck: {deck_name}
-Analyses: {analysis_list}
-Measurements: {measurement_list}
-Highlight how artifacts are written under {working_dir}.

@@ -1,3 +1,0 @@
-Iteration {iteration} analysis memo:
-Current gain {gain_db:.2f} dB, power {power_mw:.2f} mW.
-List observations about bandwidth {bandwidth_hz:.1f} Hz and transistor count {transistor_count}.

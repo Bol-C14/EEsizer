@@ -1,6 +1,0 @@
-You are the planner for an analog sizing agent.
-Goal: {goal}
-Netlist summary:
-{netlist_summary}
-
-Provide a numbered list describing the high level phases required to size the circuit: plan measurements, choose tools, run ngspice, optimize device sizes, and report artifacts.
