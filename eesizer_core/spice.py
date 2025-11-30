@@ -52,7 +52,7 @@ class ControlDeck:
     def render(self) -> str:
         """Return a block of analysis/measurement statements."""
 
-        lines: list[str] = []
+        lines: list[str] = [".control"]
         if self.saves:
             unique = []
             for target in self.saves:
@@ -60,7 +60,7 @@ class ControlDeck:
                     unique.append(target)
             if unique:
                 lines.append("* --- saved waveforms ---")
-                lines.append(".save " + " ".join(unique))
+                lines.append("save " + " ".join(unique))
         lines.append("* --- simulation directives ---")
         for directive in self.directives:
             if directive.description:
@@ -75,11 +75,10 @@ class ControlDeck:
         if self.notes:
             lines.append("* --- notes ---")
             lines.extend(self.notes)
+        lines.append("run")
         if self.waveform_exports:
             lines.append("* --- waveform exports ---")
-            lines.append(".control")
             lines.append("set filetype=ascii")
-            lines.append("run")
             for export in self.waveform_exports:
                 if export.description:
                     lines.append(f"* {export.description}")
@@ -87,7 +86,7 @@ class ControlDeck:
                     lines.append(f"setplot {export.plot}")
                 vector_list = " ".join(export.vectors)
                 lines.append(f"wrdata {export.filename} {vector_list}")
-            lines.append(".endc")
+        lines.append(".endc")
         return "\n".join(lines) + "\n"
 
 

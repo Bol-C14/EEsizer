@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import uuid
 import shutil
@@ -179,11 +180,14 @@ def select_agent_config(config: OrchestratorConfig, preferred: str | None = None
 
 
 def build_simulator(agent_config: AgentConfig, orchestrator_config: OrchestratorConfig):
+    allow_real = os.environ.get("EESIZER_ENABLE_REAL_NGSPICE", "").lower() in {"1", "true", "yes"}
     for tool_name in agent_config.tools:
         tool_cfg = orchestrator_config.tools.get(tool_name)
         if not tool_cfg:
             continue
         if tool_cfg.kind == "ngspice":
+            if not allow_real:
+                continue
             binary_value = tool_cfg.parameters.get("binary") or agent_config.simulation.binary_path
             binary_path = Path(binary_value)
             if binary_path.exists() or shutil.which(str(binary_path)):

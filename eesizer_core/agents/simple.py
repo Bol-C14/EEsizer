@@ -6,7 +6,6 @@ import csv
 import json
 import re
 import shutil
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Sequence
 
@@ -25,30 +24,14 @@ from ..providers import LLMProvider, build_provider
 from ..simulation import MockNgSpiceSimulator, NgSpiceRunner
 from ..spice import (
     ControlDeck,
-    WaveformExport,
-    ac_simulation,
     describe_measurements,
-    dc_simulation,
-    tran_simulation,
 )
 from ..toolchain import ToolChainExecutor, ToolChainParser, ToolRegistry
 from .base import Agent, AgentMetadata
-
-
-@dataclass(slots=True)
-class OptimizationTargets:
-    gain_db: float
-    power_mw: float
-
-
-@dataclass(slots=True)
-class OptimizationHistoryEntry:
-    iteration: int
-    gain_db: float
-    power_mw: float
-    analysis_note: str
-    optimization_note: str
-    sizing_note: str
+from .optimizer import MetricOptimizer
+from .reporting import OptimizationReporter
+from .scoring import OptimizationTargets, ScoringPolicy
+from .tooling import build_default_deck
 
 
 class SimpleSizingAgent(Agent):
@@ -93,6 +76,17 @@ class SimpleSizingAgent(Agent):
             default_tool_calls=self._default_tool_calls(),
             force_live=force_live_llm,
         )
+        self.scoring = self._build_scoring_policy()
+        self.optimizer = MetricOptimizer(
+            scoring=self.scoring,
+            prompts=self.prompts,
+            targets=self.targets,
+            max_iterations=self.config.optimization.max_iterations,
+            nudge_fn=self._nudge_metrics,
+            stagnation_rounds=self._optimizer_param("stagnation_rounds", default=3, cast=int),
+            min_improvement=self._optimizer_param("min_improvement", default=0.01, cast=float),
+        )
+        self.reporter: OptimizationReporter | None = None
 
     def build_plan(self, context: ExecutionContext) -> Sequence[Message]:
         """Emit a planning note that assumes ``context.netlist_path`` is set."""
@@ -216,130 +210,29 @@ class SimpleSizingAgent(Agent):
     def optimize(self, context: ExecutionContext, metrics: Mapping[str, float]) -> MutableMapping[str, float]:
         """Iteratively nudge metrics upward while mirroring the notebook log style."""
 
-        optimized = dict(metrics)
-        history: list[OptimizationHistoryEntry] = []
-        max_iterations = self.config.optimization.max_iterations
-        tolerance = self.config.optimization.tolerance_percent
-        strategy_note = self.prompts.load("optimization_strategy").render(
-            target_gain_db=self.targets.gain_db,
-            target_power_mw=self.targets.power_mw,
-            tolerance_percent=tolerance * 100,
-        )
-        context.log(
-            Message(
-                role=MessageRole.SYSTEM,
-                content=strategy_note,
-                name="optimization_strategy",
-            )
-        )
-        for iteration in range(1, max_iterations + 1):
-            analysis_note = self.prompts.load("analysing_system_prompt").render(
-                iteration=iteration,
-                gain_db=optimized.get("gain_db", 0.0),
-                power_mw=optimized.get("power_mw", 0.0),
-                bandwidth_hz=optimized.get("bandwidth_hz", 0.0),
-                transistor_count=optimized.get("transistor_count", 0.0),
-            )
-            context.log(
-                Message(role=MessageRole.USER, content=analysis_note, name="analysis_prompt")
-            )
-            optimization_note = self.prompts.load("optimization_prompt").render(
-                iteration=iteration,
-                power_budget=self.targets.power_mw,
-                target_gain_db=self.targets.gain_db,
-            )
-            context.log(
-                Message(
-                    role=MessageRole.ASSISTANT,
-                    content=optimization_note,
-                    name=self.metadata.name,
-                )
-            )
-            next_metrics = self._nudge_metrics(optimized)
-            gain_delta = next_metrics.get("gain_db", 0.0) - optimized.get("gain_db", 0.0)
-            power_delta = next_metrics.get("power_mw", 0.0) - optimized.get("power_mw", 0.0)
-            sizing_note = self.prompts.load("sizing_prompt").render(
-                iteration=iteration,
-                gain_delta=gain_delta,
-                power_delta=power_delta,
-            )
-            context.log(
-                Message(role=MessageRole.ASSISTANT, content=sizing_note, name="sizing_logger")
-            )
-            optimized = next_metrics
-            history.append(
-                OptimizationHistoryEntry(
-                    iteration=iteration,
-                    gain_db=optimized.get("gain_db", 0.0),
-                    power_mw=optimized.get("power_mw", 0.0),
-                    analysis_note=analysis_note,
-                    optimization_note=optimization_note,
-                    sizing_note=sizing_note,
-                )
-            )
-            if self._meets_targets(optimized, tolerance):
-                break
-
+        baseline_metrics = dict(metrics)
+        result = self.optimizer.optimize(context, metrics)
+        optimized = dict(result.metrics)
         optimized["gain_db"] = max(optimized.get("gain_db", 0.0), self.targets.gain_db)
         optimized["power_mw"] = min(optimized.get("power_mw", self.targets.power_mw), self.targets.power_mw)
-        optimized["iterations"] = float(len(history))
+        optimized["iterations"] = float(len(result.history))
         optimized["meets_gain"] = float(optimized.get("gain_db", 0.0) >= self.targets.gain_db)
         optimized["meets_power"] = float(optimized.get("power_mw", 0.0) <= self.targets.power_mw)
+        optimized["composite_score"] = float(result.best_score)
 
         self._emit_target_summary(context)
         artifacts_dir = self._resolve_dir(context, "artifacts")
-        optimized_path = artifacts_dir / "optimization_summary.json"
-        optimized_path.write_text(json.dumps(optimized, indent=2))
-        context.attach_artifact(
-            "optimization_summary",
-            optimized_path,
-            kind=ArtifactKind.OPTIMIZATION,
-            description="Notebook-style optimization summary containing iterations and flags.",
-        )
-        history_csv = artifacts_dir / "optimization_history.csv"
-        with history_csv.open("w", newline="") as handle:
-            writer = csv.DictWriter(
-                handle, fieldnames=["iteration", "gain_db", "power_mw", "analysis_note"]
-            )
-            writer.writeheader()
-            for entry in history:
-                writer.writerow(
-                    {
-                        "iteration": entry.iteration,
-                        "gain_db": f"{entry.gain_db:.3f}",
-                        "power_mw": f"{entry.power_mw:.3f}",
-                        "analysis_note": entry.analysis_note,
-                    }
-                )
-        context.attach_artifact(
-            "optimization_history_csv",
-            history_csv,
-            kind=ArtifactKind.OPTIMIZATION,
-            description="Iteration-by-iteration metrics stored as CSV.",
-        )
-        history_log = artifacts_dir / "optimization_history.log"
-        history_text = []
-        for entry in history:
-            history_text.append(
-                f"Iteration {entry.iteration}: gain={entry.gain_db:.3f} dB, power={entry.power_mw:.3f} mW\n"
-                f"{entry.analysis_note}\n{entry.optimization_note}\n{entry.sizing_note}"
-            )
-        history_log.write_text("\n\n".join(history_text))
-        context.attach_artifact(
-            "optimization_history_log",
-            history_log,
-            kind=ArtifactKind.OPTIMIZATION,
-            description="Text log summarizing prompts and adjustments per iteration.",
-        )
-        history_pdf = artifacts_dir / "optimization_history.pdf"
-        history_pdf.write_text(
-            "Notebook-equivalent optimization report\n\n" + "\n\n".join(history_text)
-        )
-        context.attach_artifact(
-            "optimization_history_pdf",
-            history_pdf,
-            kind=ArtifactKind.OPTIMIZATION,
-            description="Lightweight PDF placeholder mirroring the notebook artifact list.",
+        self.reporter = OptimizationReporter(artifacts_dir)
+        self.reporter.write_summary(context, optimized)
+        self.reporter.write_history(context, result.history)
+        # Variant comparison: baseline vs optimized
+        self.reporter.write_variant_comparison(
+            context,
+            variants=(
+                ("baseline", baseline_metrics),
+                ("optimized", optimized),
+            ),
+            scoring_fn=self.scoring.score,
         )
 
         copied_netlist = artifacts_dir / context.netlist_path.name
@@ -418,7 +311,7 @@ class SimpleSizingAgent(Agent):
         self, call: ToolCall, context: ExecutionContext, state: MutableMapping[str, Any]
     ) -> ToolResult:
         netlist_text = state.get("netlist_text")
-        deck = self._build_default_deck(call.arguments, netlist_text=netlist_text)
+        deck = build_default_deck(call.arguments, netlist_text=netlist_text)
         deck_key = self._deck_key(call.call_id or call.name)
         state[deck_key] = deck
         state[self._deck_key(call.name)] = deck
@@ -442,7 +335,7 @@ class SimpleSizingAgent(Agent):
         if deck is None:
             deck = state.get("last_deck")
         if deck is None:
-            deck = self._build_default_deck({}, netlist_text=state.get("netlist_text"))
+            deck = build_default_deck({}, netlist_text=state.get("netlist_text"))
         netlist_text = state.get("netlist_text")
         if not isinstance(netlist_text, str):
             raise ValueError("Netlist text missing from tool-chain state")
@@ -465,130 +358,6 @@ class SimpleSizingAgent(Agent):
         state["simulation_summary"] = summary
         return ToolResult(call_id=call.call_id or "summary", content={"summary": summary})
 
-    def _build_default_deck(
-        self, arguments: Mapping[str, Any], *, netlist_text: str | None = None
-    ) -> ControlDeck:
-        deck_name = str(arguments.get("deck_name", "ota_ac_combo"))
-        output_node = self._resolve_identifier(
-            arguments.get("output_node"),
-            netlist_text,
-            ("out", "vout", "outp", "vout+"),
-            default="out",
-        )
-        input_node = self._resolve_identifier(
-            arguments.get("input_node"),
-            netlist_text,
-            ("diffin", "vin", "inp", "in", "vinp", "vip", "in1"),
-            default="in",
-        )
-        supply_source = self._resolve_identifier(
-            arguments.get("supply_source"),
-            netlist_text,
-            ("vdd", "vcc", "vdd!"),
-            default="vdd",
-        )
-        dc_source = self._resolve_identifier(
-            arguments.get("dc_source"),
-            netlist_text,
-            ("vid", "vin", "vinp"),
-            default="VIN",
-        )
-        directives = (
-            dc_simulation(
-                source=dc_source,
-                start=float(arguments.get("dc_start", -0.1)),
-                stop=float(arguments.get("dc_stop", 0.1)),
-                step=float(arguments.get("dc_step", 0.01)),
-                description="DC operating point sweep",
-            ),
-            ac_simulation(
-                sweep=str(arguments.get("ac_sweep", "dec")),
-                points=int(arguments.get("ac_points", 40)),
-                start_hz=float(arguments.get("ac_start", 10.0)),
-                stop_hz=float(arguments.get("ac_stop", 1e6)),
-                description="AC magnitude sweep",
-            ),
-            tran_simulation(
-                step=float(arguments.get("tran_step", 1e-7)),
-                stop=float(arguments.get("tran_stop", 1e-3)),
-                description="Transient window for THD/power",
-            ),
-        )
-        save_targets = {
-            f"V({output_node})",
-            f"V({input_node})",
-            f"V({supply_source})",
-            f"I({supply_source})",
-        }
-        waveform_exports = (
-            WaveformExport(
-                filename="output_tran.dat",
-                vectors=(
-                    "time",
-                    f"V({output_node})",
-                    f"V({input_node})",
-                    f"V({supply_source})",
-                    f"I({supply_source})",
-                ),
-                plot="tran1",
-                description="Transient waveforms for THD/power derivation",
-            ),
-            WaveformExport(
-                filename="output_ac.dat",
-                vectors=(
-                    "frequency",
-                    f"vdb({output_node})",
-                ),
-                plot="ac1",
-                description="AC magnitude for gain/bandwidth derivation",
-            ),
-        )
-        measurements = standard_measurements(
-            output_node=output_node,
-            input_node=input_node,
-            supply_source=supply_source,
-            fundamental_hz=float(arguments.get("tran_fundamental", 1e3)),
-        )
-        return ControlDeck(
-            name=deck_name,
-            directives=directives,
-            measurements=measurements,
-            saves=tuple(sorted(save_targets)),
-            waveform_exports=waveform_exports,
-        )
-
-    def _resolve_identifier(
-        self,
-        provided: object,
-        netlist_text: str | None,
-        fallbacks: Sequence[str],
-        *,
-        default: str,
-    ) -> str:
-        candidates: list[str] = []
-        if isinstance(provided, str) and provided.strip():
-            candidates.append(provided.strip())
-        candidates.extend(fallbacks)
-        guess = self._guess_identifier(netlist_text, tuple(candidates))
-        if guess:
-            return guess
-        if candidates:
-            return candidates[0]
-        return default
-
-    @staticmethod
-    def _guess_identifier(netlist_text: str | None, candidates: Sequence[str]) -> str | None:
-        if not isinstance(netlist_text, str):
-            return None
-        for candidate in candidates:
-            if not candidate:
-                continue
-            pattern = re.compile(rf"\b{re.escape(candidate)}\b", re.IGNORECASE)
-            match = pattern.search(netlist_text)
-            if match:
-                return match.group(0)
-        return None
-
     def _nudge_metrics(self, metrics: Mapping[str, float]) -> MutableMapping[str, float]:
         updated = dict(metrics)
         gain = updated.get("gain_db", 0.0)
@@ -604,13 +373,6 @@ class SimpleSizingAgent(Agent):
         updated["bandwidth_hz"] = max(1e3, bandwidth * 0.99)
         updated.setdefault("transistor_count", 0.0)
         return updated
-
-    def _meets_targets(self, metrics: Mapping[str, float], tolerance: float) -> bool:
-        gain = metrics.get("gain_db", 0.0)
-        power = metrics.get("power_mw", 0.0)
-        gain_ok = gain >= self.targets.gain_db * (1 - tolerance)
-        power_ok = power <= self.targets.power_mw * (1 + tolerance)
-        return gain_ok and power_ok
 
     def _deck_key(self, identifier: str | None) -> str:
         return f"deck:{identifier or 'default'}"
@@ -673,5 +435,56 @@ class SimpleSizingAgent(Agent):
         context.metadata["cached_metrics"] = json.dumps(merged)
         return merged
 
+    def _build_scoring_policy(self) -> ScoringPolicy:
+        scoring_cfg = {}
+        try:
+            scoring_cfg = dict(getattr(self.config, "extra", {}).get("scoring", {}))
+        except Exception:
+            scoring_cfg = {}
+        weights: MutableMapping[str, float] = {}
+        raw_weights = scoring_cfg.get("weights", {}) if isinstance(scoring_cfg, Mapping) else {}
+        if isinstance(raw_weights, Mapping):
+            for key, value in raw_weights.items():
+                try:
+                    weights[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
 
-__all__ = ["SimpleSizingAgent", "OptimizationTargets"]
+        plugins = []
+        raw_plugins = scoring_cfg.get("plugins", ()) if isinstance(scoring_cfg, Mapping) else ()
+        if isinstance(raw_plugins, (list, tuple)):
+            for dotted in raw_plugins:
+                func = self._resolve_plugin(dotted)
+                if func:
+                    plugins.append(func)
+
+        return ScoringPolicy(
+            self.targets,
+            tolerance=self.config.optimization.tolerance_percent,
+            weights=weights or {"gain": 1.0, "power": 1.0},
+            plugins=tuple(plugins),
+        )
+
+    def _optimizer_param(self, key: str, *, default, cast):
+        try:
+            value = getattr(self.config, "extra", {}).get("optimizer", {}).get(key, default)
+            return cast(value)
+        except Exception:
+            return default
+
+    @staticmethod
+    def _resolve_plugin(dotted: object):
+        if not isinstance(dotted, str):
+            return None
+        try:
+            import importlib
+
+            module_name, func_name = dotted.rsplit(".", 1)
+            module = importlib.import_module(module_name)
+            func = getattr(module, func_name, None)
+            return func if callable(func) else None
+        except Exception:
+            return None
+
+
+__all__ = ["SimpleSizingAgent", "OptimizationTargets", "ScoringPolicy"]

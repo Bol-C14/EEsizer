@@ -35,13 +35,13 @@ class PipelineRunResult:
 def has_real_ngspice() -> bool:
     """Return ``True`` if a usable ngspice binary is available."""
 
-    if os.environ.get("EESIZER_ENABLE_REAL_NGSPICE") == "0":
+    env_hint = os.environ.get("EESIZER_ENABLE_REAL_NGSPICE")
+    if env_hint is None:
+        return False
+    if env_hint.lower() not in {"1", "true", "yes"}:
         return False
     binary = shutil.which("ngspice")
-    if not binary:
-        return False
-    env_hint = os.environ.get("EESIZER_ENABLE_REAL_NGSPICE")
-    return bool(binary and (env_hint is None or env_hint.lower() in {"1", "true", "yes"}))
+    return bool(binary)
 
 
 def _build_orchestrator(use_real_ngspice: bool, workdir: Path | None) -> OrchestratorConfig:

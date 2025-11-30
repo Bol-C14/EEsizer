@@ -201,7 +201,8 @@ class NgSpiceRunner:
         self, path: Path, vectors: Sequence[str]
     ) -> Mapping[str, Sequence[float]]:
         columns: dict[str, list[float]] = {vector: [] for vector in vectors}
-        expected = len(vectors) * 2
+        expected_complex = len(vectors) * 2
+        expected_simple = len(vectors)
         try:
             lines = path.read_text().splitlines()
         except OSError:
@@ -211,10 +212,15 @@ class NgSpiceRunner:
             if not stripped:
                 continue
             parts = stripped.split()
-            if len(parts) < expected:
+            indices: Sequence[int]
+            if len(parts) >= expected_complex:
+                indices = tuple(range(0, expected_complex, 2))
+            elif len(parts) >= expected_simple:
+                indices = tuple(range(expected_simple))
+            else:
                 continue
             try:
-                real_values = [float(parts[idx]) for idx in range(0, expected, 2)]
+                real_values = [float(parts[idx]) for idx in indices]
             except (TypeError, ValueError):
                 continue
             for vector, value in zip(vectors, real_values):
@@ -266,7 +272,10 @@ class NgSpiceRunner:
                     return waveforms[candidate]
             return None
 
-        output_wave = first_matching(["v(out)", "out", "vout", "v(out+)", "v(o)"])
+        output_wave = first_matching(["v(out)", "out", "vout", "v(out+)", "v(outp)", "v(o)", "outp"])
+        input_wave = first_matching(
+            ["v(in)", "vin", "v(inp)", "vinp", "v(vinp)", "vip", "v(vip)", "input", "in"]
+        )
         if output_wave:
             vmax = max(output_wave)
             vmin = min(output_wave)
@@ -276,6 +285,20 @@ class NgSpiceRunner:
             thd_db = self._estimate_thd(output_wave)
             if thd_db is not None:
                 metrics.setdefault("thd_output_db", thd_db)
+            noise_rms = self._estimate_noise(output_wave)
+            if noise_rms is not None:
+                metrics.setdefault("noise_rms_v", noise_rms)
+                metrics.setdefault("noise_mv", noise_rms * 1e3)
+        if output_wave and input_wave:
+            in_pp = max(input_wave) - min(input_wave)
+            out_pp = max(output_wave) - min(output_wave)
+            if in_pp not in (0, None):
+                try:
+                    gain_linear = abs(out_pp / in_pp)
+                    if gain_linear > 0:
+                        metrics.setdefault("tran_gain_db", 20.0 * log10(gain_linear))
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
 
         vgs_wave = first_matching(["vgs", "vgs(node)", "vgs(m1)"])
         vth_wave = first_matching(["vth", "vth(node)", "vth(m1)"])
@@ -313,24 +336,47 @@ class NgSpiceRunner:
         freq_wave = waveforms.get("frequency")
         if freq_wave:
             vdb_key = next((k for k in waveforms if k.startswith("vdb(")), None)
+            vp_key = next((k for k in waveforms if k.startswith("vp(")), None)
             if vdb_key:
                 vdb_wave = waveforms[vdb_key]
+                phase_wave = waveforms.get(vp_key) if vp_key else None
                 if len(vdb_wave) == len(freq_wave) and vdb_wave:
                     max_gain = max(vdb_wave)
                     metrics.setdefault("ac_gain_db", max_gain)
-                    
-                    # Bandwidth (-3dB)
+
                     target_3db = max_gain - 3.0
-                    for f, g in zip(freq_wave, vdb_wave):
-                        if g <= target_3db:
+                    bandwidth_found = "bandwidth_hz" in metrics
+                    unity_found = "unity_bandwidth_hz" in metrics
+                    for idx, (f, g) in enumerate(zip(freq_wave, vdb_wave)):
+                        if not bandwidth_found and g <= target_3db:
                             metrics.setdefault("bandwidth_hz", f)
-                            break
-                    
-                    # Unity Bandwidth (0dB)
-                    for f, g in zip(freq_wave, vdb_wave):
-                        if g <= 0.0:
+                            bandwidth_found = True
+                        if not unity_found and g <= 0.0:
                             metrics.setdefault("unity_bandwidth_hz", f)
+                            unity_found = True
+                            if phase_wave and idx < len(phase_wave):
+                                metrics.setdefault("phase_margin_deg", 180.0 + phase_wave[idx])
+                        if bandwidth_found and unity_found and (
+                            "phase_margin_deg" in metrics or not phase_wave
+                        ):
                             break
+
+                    if (
+                        phase_wave
+                        and len(phase_wave) == len(freq_wave)
+                        and "phase_margin_deg" not in metrics
+                        and "unity_bandwidth_hz" in metrics
+                    ):
+                        unity_freq = metrics["unity_bandwidth_hz"]
+                        try:
+                            closest_idx = min(
+                                range(len(freq_wave)), key=lambda i: abs(freq_wave[i] - unity_freq)
+                            )
+                            metrics["phase_margin_deg"] = 180.0 + phase_wave[closest_idx]
+                        except (ValueError, IndexError):
+                            pass
+                    if "unity_bandwidth_hz" in metrics:
+                        metrics.setdefault("unity_gain_frequency_hz", metrics["unity_bandwidth_hz"])
 
         return metrics
 
@@ -378,6 +424,20 @@ class NgSpiceRunner:
         if harmonic_rms <= 0:
             return None
         return 20.0 * log10(harmonic_rms / fundamental)
+
+    def _estimate_noise(self, samples: Sequence[float]) -> float | None:
+        """Estimate RMS noise from a waveform by removing DC and taking stddev."""
+
+        if not samples:
+            return None
+        try:
+            mean = sum(samples) / len(samples)
+            variance = sum((x - mean) ** 2 for x in samples) / len(samples)
+            if variance < 0:
+                return None
+            return variance**0.5
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
 
     def _materialize_includes(self, text: str, workspace: Path) -> None:
         for line in text.splitlines():

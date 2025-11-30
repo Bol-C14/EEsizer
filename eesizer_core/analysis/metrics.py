@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Mapping, MutableMapping, Sequence
 
-from ..spice import MeasurementSpec, measure_gain, measure_thd
+from ..spice import MeasurementSpec, measure_gain, measure_power, measure_thd
 
 
 def output_swing_measurements(output_node: str, *, prefix: str = "output_swing") -> Sequence[MeasurementSpec]:
@@ -91,17 +91,19 @@ def gain_measurements(output_node: str, input_node: str) -> Sequence[Measurement
     """AC and transient gain helpers following notebook conventions."""
 
     return (
-        MeasurementSpec(
-            name="ac_gain_db",
-            statement="* ac_gain_db computed in post-processing",
+        measure_gain(
+            "ac_gain_db",
+            output_node=output_node,
+            input_node=input_node,
             analysis="ac",
-            description="Small-signal AC gain",
+            description="Small-signal AC gain (dB)",
         ),
-        MeasurementSpec(
-            name="tran_gain_db",
-            statement="* tran_gain_db computed in post-processing",
+        measure_gain(
+            "tran_gain_db",
+            output_node=output_node,
+            input_node=input_node,
             analysis="tran",
-            description="Large-signal transient gain",
+            description="Large-signal transient gain (dB)",
         ),
     )
 
@@ -132,6 +134,15 @@ def standard_measurements(
     measurements.append(offset_measurement(output_node))
     measurements.extend(icmr_measurements(input_node))
     measurements.append(cmrr_measurement(output_node, input_node))
+    measurements.extend(bandwidth_measurements(output_node))
+    measurements.append(
+        measure_power(
+            "power_mw",
+            supply_source=supply_source,
+            description="Average supply power during transient window (mW)",
+        )
+    )
+    measurements.append(thd_measurement(output_node, fundamental_hz))
     return tuple(measurements)
 
 
@@ -156,6 +167,7 @@ def aggregate_measurement_values(raw: Mapping[str, float]) -> MutableMapping[str
         metrics.setdefault("gain_db", float(raw["ac_gain_db"]))
     if "tran_gain_db" in raw:
         metrics.setdefault("tran_gain_db", float(raw["tran_gain_db"]))
+        metrics.setdefault("gain_db", metrics.get("gain_db", float(raw["tran_gain_db"])))
     if "output_swing_max" in raw and "output_swing_min" in raw:
         metrics.setdefault(
             "output_swing_v", float(raw["output_swing_max"]) - float(raw["output_swing_min"])
@@ -174,10 +186,31 @@ def aggregate_measurement_values(raw: Mapping[str, float]) -> MutableMapping[str
         metrics.setdefault("bandwidth_hz", float(raw["bandwidth_hz"]))
     if "unity_bandwidth_hz" in raw:
         metrics.setdefault("unity_bandwidth_hz", float(raw["unity_bandwidth_hz"]))
+    if "unity_gain_frequency_hz" in raw:
+        metrics.setdefault("unity_bandwidth_hz", float(raw["unity_gain_frequency_hz"]))
     if "icmr_min_v" in raw:
         metrics.setdefault("icmr_min_v", float(raw["icmr_min_v"]))
     if "icmr_max_v" in raw:
         metrics.setdefault("icmr_max_v", float(raw["icmr_max_v"]))
+    if "icmr_min_v" in metrics and "icmr_max_v" in metrics:
+        metrics.setdefault("icmr_range_v", metrics["icmr_max_v"] - metrics["icmr_min_v"])
+    if "power_w" in raw:
+        metrics.setdefault("power_mw", float(raw["power_w"]) * 1e3)
+    if "power" in raw and "power_mw" not in metrics:
+        try:
+            metrics["power_mw"] = float(raw["power"]) * 1e3
+        except (TypeError, ValueError):
+            pass
+    if "phase_margin" in raw:
+        metrics.setdefault("phase_margin_deg", float(raw["phase_margin"]))
+    if "phase_margin_deg" in raw:
+        metrics.setdefault("phase_margin_deg", float(raw["phase_margin_deg"]))
+    if "noise_rms_v" in raw:
+        metrics.setdefault("noise_rms_v", float(raw["noise_rms_v"]))
+        metrics.setdefault("noise_mv", float(raw["noise_rms_v"]) * 1e3)
+    if "noise_mv" in raw:
+        metrics.setdefault("noise_mv", float(raw["noise_mv"]))
+        metrics.setdefault("noise_rms_v", float(raw["noise_mv"]) / 1e3)
     return metrics
 
 
