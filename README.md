@@ -5,12 +5,38 @@
 This project introduces an LLM-based AI agent designed to assist with sizing in analog and mixed-signal (AMS) circuit design. By integrating large language models (LLMs) with Ngspice simulation, custom data analysis functions, and employing prompt engineering strategies, the agent effectively optimizes circuits to meet specified performance metrics.
 The tool takes as input a SPICE-based netlist and natural language performance specifications, and outputs both an iterative optimization process and the final optimized netlist. You can visualize and track the optimization history and verify the robustness of the final design using the provided variation test. Multiple LLMs are supported and can be selected by the user.
 
+## Install & CLI
+
+The repository now ships a package descriptor (`pyproject.toml`) so the runtime can be installed locally:
+
+```
+pip install -e .[dev]
+```
+
+Run the end-to-end pipeline without notebooks:
+
+```
+python -m pipeline.run \
+  --netlist initial_circuit_netlist/ota.cir \
+  --goal "Boost gain while keeping power low" \
+  --run-id demo \
+  --target-gain 40 --target-power 3
+```
+
+Outputs are written under `output/pipeline/<run-id>/...` and a JSON summary is printed to stdout by default; pass `--quiet` to suppress stdout if you only want files. Simulations default to the mock ngspice backend unless `EESIZER_ENABLE_REAL_NGSPICE=1` and a binary is available.
+
+Key safety defaults:
+- Netlists are patched in a working copy inside the run directory; the original input file is left untouched.
+- Optimization results report `meets_gain`, `meets_power`, and `targets_met` flags instead of forcing metrics to target values.
+- Recorded provider stubs are used unless live API credentials are present (or `--live-llm` is set).
+
 ## Key Features
 
 1. AI-assisted sizing: Get LLM-generated suggestions for transistor dimensions based on input specifications
 2. SPICE-compatible output: Generates netlists compatible with popular circuit simulators ngspice.
 3. Simulation in-loop: Achieved by LLM function calling. All the functions are pre-defined in the agent.
 4. Performance-aware iterative optimization: Considers the required key AMS metrics during sizing. Result history is also used to provide a highly relevant context to enable effective in-context learning.
+5. Structured netlist patching: Parameter changes can be applied programmatically (`ParamChange`/`apply_param_changes`) before simulation to reduce LLM-produced syntax errors, with automatic rollback on failures.
 
 ## Getting Started
 
@@ -94,6 +120,12 @@ tasks_generation_question = "This is a circuit netlist, optimize this circuit wi
 We evaluated the performance of different LLMs to assess their applicability and optimization effectiveness across seven basic circuits. 
 
 ![Performance comparison of different LLMs](/figures/performance-new.png) 
+
+## Architecture & Docs
+
+- **Service decomposition**: Planning, tool selection, simulation, and optimization/reporting are standalone services under `eesizer_core/agents/services/`. See `docs/wiki/service_layer.md` for responsibilities and extension hooks.
+- **Agent interfaces**: `docs/agent_interface_blueprint.md` links notebook behaviors to the Python interfaces; `docs/architecture_cn.md` provides a Chinese overview of the core modules and dataflow.
+- **Legacy notice**: The `eesizer/` and `scripts/` folders are kept for historical artifacts only; new code lives in `eesizer_core` and the packaged CLI.
 
 
 # Acknowledgements 

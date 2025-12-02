@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
+import shutil
 import sys
 import uuid
-import shutil
 from pathlib import Path
 from typing import Any, Dict
 
@@ -26,6 +27,14 @@ from eesizer_core import (
     OrchestratorConfig,
     SimpleSizingAgent,
 )
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("pipeline")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "default_model": "gpt-4o-mini",
@@ -145,6 +154,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Force live LLM calls when credentials are configured (defaults to recorded fixtures).",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress JSON summary on stdout (logs and result file are still written).",
+    )
     return parser.parse_args(argv)
 
 
@@ -181,32 +195,39 @@ def select_agent_config(config: OrchestratorConfig, preferred: str | None = None
 
 def build_simulator(agent_config: AgentConfig, orchestrator_config: OrchestratorConfig):
     allow_real = os.environ.get("EESIZER_ENABLE_REAL_NGSPICE", "").lower() in {"1", "true", "yes"}
+    logger.info(f"Building simulator. Real ngspice enabled: {allow_real}")
     for tool_name in agent_config.tools:
         tool_cfg = orchestrator_config.tools.get(tool_name)
         if not tool_cfg:
             continue
         if tool_cfg.kind == "ngspice":
             if not allow_real:
+                logger.debug(f"Skipping ngspice tool '{tool_name}' because EESIZER_ENABLE_REAL_NGSPICE is not set")
                 continue
             binary_value = tool_cfg.parameters.get("binary") or agent_config.simulation.binary_path
             binary_path = Path(binary_value)
             if binary_path.exists() or shutil.which(str(binary_path)):
+                logger.info(f"Found ngspice binary at: {binary_path}")
                 agent_config.simulation.binary_path = binary_path
                 include_paths = [Path(p) for p in tool_cfg.parameters.get("include_paths", [])]
                 return NgSpiceRunner(agent_config.simulation, include_paths=include_paths)
+            logger.warning(f"ngspice binary not found at {binary_path}, falling back to mock")
             continue
         if tool_cfg.kind in {"simulator", "mock"}:
+            logger.info("Using MockNgSpiceSimulator")
             break
     return MockNgSpiceSimulator(agent_config.simulation)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    logger.info(f"Starting pipeline run with ID: {args.run_id or 'auto-generated'}")
     config_data = load_config(args.config)
     if args.workdir:
         config_data.setdefault("output_paths", {})["root"] = str(args.workdir)
     orchestrator_config = build_orchestrator_config(config_data)
     agent_name, agent_config = select_agent_config(orchestrator_config, preferred=args.agent)
+    logger.info(f"Selected agent: {agent_name} ({agent_config.model})")
     simulator = build_simulator(agent_config, orchestrator_config)
     targets = OptimizationTargets(gain_db=args.target_gain, power_mw=args.target_power)
     agent_cls = AGENT_REGISTRY.get(agent_name)
@@ -227,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     layout = output_policy.build_layout(run_id, netlist_stem=args.netlist.stem)
     run_dir = layout.run_dir
     working_root = output_policy.root
+    logger.info(f"Run directory: {run_dir}")
 
     def _pre_run(ctx):
         ctx.metadata["lifecycle_state"] = "starting"
@@ -250,7 +272,9 @@ def main(argv: list[str] | None = None) -> int:
             supply_voltage=args.supply_voltage,
             temperature_c=args.temperature,
         )
+        logger.info("Starting agent execution...")
         result = agent.run(ctx)
+        logger.info("Agent execution finished.")
 
     summary = {
         "run_id": run_id,
@@ -260,7 +284,9 @@ def main(argv: list[str] | None = None) -> int:
         "sim_output": ctx.metadata.get("sim_output"),
         "agent": {"name": agent_config.name, "model": agent_config.model},
     }
-    print(json.dumps(summary, indent=2))
+    if not args.quiet:
+        print(json.dumps(summary, indent=2))
+    logger.info("Pipeline finished successfully.")
     result_path = run_dir / "pipeline_result.json"
     result_path.write_text(json.dumps(summary, indent=2))
     return 0

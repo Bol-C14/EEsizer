@@ -10,6 +10,7 @@ This document links the draft Python package under `eesizer_core/` with the note
 | `eesizer_core.context` | Provides `ExecutionContext` plus `ContextManager` to track working directories (`output/…`), message logs, and generated artifacts. |
 | `eesizer_core.config` | Describes `SimulationConfig`, `OptimizationConfig`, and `AgentConfig` objects that capture ngspice paths, tolerance bands, and LLM model choices. |
 | `eesizer_core.agents.base` | Supplies the abstract `Agent` lifecycle (plan → tool selection → simulation → optimization) mirroring the notebook loop. |
+| `eesizer_core.agents.services.*` | Optional service layer that decouples planning, tool selection, simulation, and optimization/reporting for easier substitution/testing. |
 
 All downstream agents import these modules to ensure consistent data contracts.
 

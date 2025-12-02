@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eesizer-core"
+version = "0.1.0"
+description = "Modular sizing agents, toolchain, and simulation helpers for EEsizer."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+  { name = "EEsizer contributors" }
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.optional-dependencies]
+yaml = ["pyyaml>=6.0"]
+openai = ["openai>=1.37.0"]
+anthropic = ["anthropic>=0.31.0"]
+gemini = ["google-generativeai>=0.8.0"]
+numeric = ["numpy>=1.26"]
+dev = [
+  "pytest>=8.2",
+  "pyyaml>=6.0",
+  "numpy>=1.26",
+]
+
+[project.scripts]
+eesizer-pipeline = "pipeline.run:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["eesizer_core", "pipeline"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "eesizer_core",
+  "pipeline",
+  "docs",
+  "tests",
+  "README.md",
+  "LICENSE",
+]

@@ -34,6 +34,7 @@ from .agents.gpt5mini import Gpt5MiniAgent
 from .agents.scoring import OptimizationTargets, ScoringPolicy
 from .agents.reporting import OptimizationReporter
 from .agents.simple import SimpleSizingAgent
+from .netlist_patch import ParamChange, apply_param_changes
 from .toolchain import ToolChainExecutor, ToolChainParser, ToolRegistry
 
 __all__ = [
@@ -79,6 +80,8 @@ __all__ = [
     "OptimizationReporter",
     "ScoringPolicy",
     "OptimizationTargets",
+    "ParamChange",
+    "apply_param_changes",
     "ControlDeck",
     "PromptLibrary",
     "ToolChainExecutor",

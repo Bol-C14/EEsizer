@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+from typing import Callable
 from pathlib import Path
 from typing import Mapping, MutableMapping, Sequence
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import os
 from math import log10
 from pathlib import Path
@@ -21,6 +22,8 @@ from .spice import (
     load_measurements,
     parse_measure_log,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -78,9 +81,9 @@ class NgSpiceRunner:
         discovered = list(include_paths or [])
         default_root = Path(__file__).resolve().parents[1]
         for candidate in (
-            default_root / "agent_test_gpt",
-            default_root / "agent_test_gemini",
-            default_root / "variation",
+            default_root / "legacy_notebook" / "agent_test_gpt",
+            default_root / "legacy_notebook" / "agent_test_gemini",
+            default_root / "legacy_notebook" / "variation",
         ):
             if candidate.exists():
                 discovered.append(candidate)
