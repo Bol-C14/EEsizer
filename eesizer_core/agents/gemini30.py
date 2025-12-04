@@ -5,7 +5,8 @@ from ..config import AgentConfig, OptimizationConfig, OutputPathPolicy, Simulati
 from ..simulation import MockNgSpiceSimulator, NgSpiceRunner
 from .base import AgentMetadata
 from .notebook import build_default_agent_config
-from .simple import OptimizationTargets, SimpleSizingAgent
+from .scoring import OptimizationTargets
+from .simple import SimpleSizingAgent
 
 
 class Gemini30Agent(SimpleSizingAgent):

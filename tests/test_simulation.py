@@ -46,3 +46,14 @@ def test_ngspice_runner_waveform_and_op_parsing(tmp_path):
     runner._persist_artifacts(artifacts, artifact_dir)
     assert (artifact_dir / "output_tran.dat").exists()
     assert (artifact_dir / "vgscheck.txt").exists()
+
+
+def test_waveform_noise_and_gain_estimation_from_tran():
+    runner = NgSpiceRunner(SimulationConfig(binary_path=Path("ngspice")))
+    waves = {
+        "v(out)": [0.0, 0.02, -0.01, 0.03, -0.015],
+        "v(in)": [0.0, 0.01, -0.005, 0.015, -0.007],
+    }
+    metrics = runner._derive_waveform_metrics(waves)
+    assert metrics["noise_mv"] > 0
+    assert metrics["tran_gain_db"] > 0

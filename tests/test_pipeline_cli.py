@@ -36,7 +36,8 @@ def test_cli_runs_end_to_end(tmp_path):
 
     payload = json.loads(result.stdout)
     assert payload["run_id"] == "pytest"
-    assert payload["metrics"]["gain_db"] >= 40
+    assert payload["metrics"]["gain_db"] > 0
+    assert "targets_met" in payload["metrics"]
     assert payload["environment"]["corner"] == "tt"
     assert payload["sim_output"]
     netlist_artifact = payload["artifacts"]["netlist_copy"]

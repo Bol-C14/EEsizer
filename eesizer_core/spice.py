@@ -7,6 +7,7 @@ import json
 import re
 from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping, Sequence
+import logging
 
 
 @dataclass(slots=True)
@@ -52,7 +53,7 @@ class ControlDeck:
     def render(self) -> str:
         """Return a block of analysis/measurement statements."""
 
-        lines: list[str] = []
+        lines: list[str] = [".control"]
         if self.saves:
             unique = []
             for target in self.saves:
@@ -60,7 +61,7 @@ class ControlDeck:
                     unique.append(target)
             if unique:
                 lines.append("* --- saved waveforms ---")
-                lines.append(".save " + " ".join(unique))
+                lines.append("save " + " ".join(unique))
         lines.append("* --- simulation directives ---")
         for directive in self.directives:
             if directive.description:
@@ -75,11 +76,10 @@ class ControlDeck:
         if self.notes:
             lines.append("* --- notes ---")
             lines.extend(self.notes)
+        lines.append("run")
         if self.waveform_exports:
             lines.append("* --- waveform exports ---")
-            lines.append(".control")
             lines.append("set filetype=ascii")
-            lines.append("run")
             for export in self.waveform_exports:
                 if export.description:
                     lines.append(f"* {export.description}")
@@ -87,7 +87,7 @@ class ControlDeck:
                     lines.append(f"setplot {export.plot}")
                 vector_list = " ".join(export.vectors)
                 lines.append(f"wrdata {export.filename} {vector_list}")
-            lines.append(".endc")
+        lines.append(".endc")
         return "\n".join(lines) + "\n"
 
 
@@ -125,39 +125,39 @@ def augment_netlist(netlist_text: str, deck: ControlDeck) -> str:
 def dc_simulation(source: str, start: float, stop: float, step: float, *, label: str | None = None,
                   description: str | None = None) -> SimulationDirective:
     label = label or f"dc_{source.lower()}"
-    statement = f".dc {source} {start:g} {stop:g} {step:g}"
+    statement = f"dc {source} {start:g} {stop:g} {step:g}"
     return SimulationDirective(label=label, statement=statement, description=description)
 
 
 def ac_simulation(sweep: str, points: int, start_hz: float, stop_hz: float, *,
                   label: str = "ac_sweep", description: str | None = None) -> SimulationDirective:
-    statement = f".ac {sweep} {points} {start_hz:g} {stop_hz:g}"
+    statement = f"ac {sweep} {points} {start_hz:g} {stop_hz:g}"
     return SimulationDirective(label=label, statement=statement, description=description)
 
 
 def tran_simulation(step: float, stop: float, *, start: float = 0.0, label: str = "tran", description: str | None = None) -> SimulationDirective:
-    statement = f".tran {step:g} {stop:g} {start:g}"
+    statement = f"tran {step:g} {stop:g} {start:g}"
     return SimulationDirective(label=label, statement=statement, description=description)
 
 
 def measure_gain(name: str, output_node: str, input_node: str, *, analysis: str = "ac",
                  description: str | None = None) -> MeasurementSpec:
-    expr = f".measure {analysis} {name} param='20*log10(abs(v({output_node})/v({input_node})))'"
+    expr = f"meas {analysis} {name} param='20*log10(abs(v({output_node})/v({input_node})))'"
     return MeasurementSpec(name=name, statement=expr, analysis=analysis, description=description)
 
 
 def measure_voltage(name: str, node: str, *, analysis: str = "dc", description: str | None = None) -> MeasurementSpec:
-    expr = f".measure {analysis} {name} find v({node})"
+    expr = f"meas {analysis} {name} find v({node})"
     return MeasurementSpec(name=name, statement=expr, analysis=analysis, description=description)
 
 
 def measure_thd(name: str, node: str, fundamental_hz: float, *, description: str | None = None) -> MeasurementSpec:
-    expr = f".measure tran {name} thd v({node}) {fundamental_hz:g}"
+    expr = f"meas tran {name} thd v({node}) {fundamental_hz:g}"
     return MeasurementSpec(name=name, statement=expr, analysis="tran", description=description)
 
 
 def measure_power(name: str, supply_source: str, *, description: str | None = None) -> MeasurementSpec:
-    expr = f".measure tran {name} param='-AVG(v({supply_source})*i({supply_source})) * 1e3'"
+    expr = f"meas tran {name} param='-AVG(v({supply_source})*i({supply_source})) * 1e3'"
     return MeasurementSpec(name=name, statement=expr, analysis="tran", description=description)
 
 
@@ -177,8 +177,11 @@ def parse_measure_log(text: str) -> MutableMapping[str, float]:
         try:
             value = float(match.group("value"))
         except (TypeError, ValueError):
+            logger.warning(f"Failed to parse measurement value from line: {line}")
             continue
         metrics[name] = value
+    if metrics:
+        logger.debug(f"Parsed {len(metrics)} metrics from log text.")
     return metrics
 
 
@@ -202,6 +205,9 @@ def describe_measurements(metrics: Mapping[str, float]) -> str:
         return "No measurements available"
     ordered = sorted(metrics.items())
     return ", ".join(f"{key}={value:.3f}" for key, value in ordered)
+
+
+logger = logging.getLogger(__name__)
 
 
 __all__ = [

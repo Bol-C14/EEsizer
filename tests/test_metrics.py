@@ -22,3 +22,19 @@ def test_aggregate_measurement_values_derives_gain_and_swing():
     )
     assert metrics["gain_db"] == 40.0
     assert metrics["output_swing_v"] == 1.0
+
+
+def test_aggregate_measurement_values_derives_power_margin_and_icmr_range():
+    metrics = aggregate_measurement_values(
+        {
+            "power_w": 0.002,
+            "tran_gain_db": 55,
+            "icmr_min_v": 0.1,
+            "icmr_max_v": 1.1,
+            "phase_margin_deg": 72.0,
+        }
+    )
+    assert metrics["power_mw"] == 2.0
+    assert metrics["gain_db"] == 55.0
+    assert metrics["icmr_range_v"] == 1.0
+    assert metrics["phase_margin_deg"] == 72.0

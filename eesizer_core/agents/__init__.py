@@ -6,7 +6,8 @@ from .gemini30 import Gemini30Agent
 from .gpt4o import Gpt4oAgent
 from .gpt5 import Gpt5Agent
 from .gpt5mini import Gpt5MiniAgent
-from .simple import OptimizationTargets, SimpleSizingAgent
+from .scoring import OptimizationTargets, ScoringPolicy
+from .simple import SimpleSizingAgent
 
 __all__ = [
     "Agent",
@@ -18,5 +19,6 @@ __all__ = [
     "Gpt5Agent",
     "Gpt5MiniAgent",
     "OptimizationTargets",
+    "ScoringPolicy",
     "SimpleSizingAgent",
 ]
