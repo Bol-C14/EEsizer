@@ -205,7 +205,7 @@ class GeminiProvider:
         *,
         response_name: str | None = None,  # noqa: ARG002 - live calls ignore hint
         tools: Sequence[Mapping[str, object]] | None = None,  # noqa: ARG002 - Gemini tool-calls not wired yet
-    ) -> LLMResponse:
+    ) -> LLMResponse://
         history = [f"{message.role.value}: {message.content}" for message in messages[:-1]]
         prompt = messages[-1].content if messages else ""
         chat_session = self.model.start_chat(history=history)
