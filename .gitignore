@@ -23,3 +23,37 @@ __pycache__/
 # Ignore environment files
 .env
 venv
+
+# Virtual environments
+.venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing / linting caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Python packaging / build
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+
+# Misc
+*.sqlite3
+*.bak
+*.tmp
+secrets.json
