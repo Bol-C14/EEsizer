@@ -166,7 +166,7 @@ def make_chat_completion_request_function(prompt):
 
     return response
 #%% md
-## User Input
+# ## User Input
 #%%
 """
 User input section, modify the netlist and tasks_generation_question as needed.
@@ -244,7 +244,7 @@ Vid diffin 0 AC 1 SIN (0 1u 10k 0 0)
 
 '''
 #%% md
-## Task Decpmposition
+# ## Task Decpmosition
 #%%
 ## prompt for tasks generation based on user input
 
@@ -1274,20 +1274,66 @@ def read_txt_as_string(file_path):
         
 def run_ngspice(circuit, filename):
     output_file = 'output/op.txt'
-    with open(f'output/{filename}.cir', 'w') as f:
+    cir_path = f'output/{filename}.cir'
+    out_dir = os.path.dirname(cir_path)
+    if not os.path.exists(out_dir):
+        print(f'Path `{out_dir}` does not exist, creating it.')
+        os.makedirs(out_dir, exist_ok=True)
+    with open(cir_path, 'w') as f:
         f.write(circuit)
 
+    # Locate ngspice executable (robust search):
+    # 1. Respect environment variable NGSPICE_PATH
+    # 2. If in conda, check $CONDA_PREFIX/bin/ngspice
+    # 3. Try to find it in PATH via shutil.which
+    # 4. Fallback to a list of common locations
+    ngspice_path = os.getenv('NGSPICE_PATH')
+    if not ngspice_path:
+        conda_prefix = os.getenv('CONDA_PREFIX') or os.getenv('CONDA_DEFAULT_ENV')
+        if conda_prefix:
+            # If CONDA_PREFIX points to env root, prefer its bin
+            candidate = os.path.join(os.getenv('CONDA_PREFIX', conda_prefix), 'bin', 'ngspice')
+            if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+                ngspice_path = candidate
+    if not ngspice_path:
+        ngspice_path = shutil.which('ngspice')
+    if not ngspice_path:
+        common_paths = [
+            '/opt/homebrew/bin/ngspice',
+            '/usr/local/bin/ngspice',
+            '/usr/bin/ngspice',
+            '/opt/local/bin/ngspice',
+            '/home/chang/Documents/test/ngspice-44.2/release/src/ngspice'
+        ]
+        for p in common_paths:
+            if os.path.exists(p) and os.access(p, os.X_OK):
+                ngspice_path = p
+                break
+
+    # If ngspice is still not found, don't raise — write a clear placeholder and return False
+    if not ngspice_path:
+        msg = 'NGSPICE_NOT_FOUND: set NGSPICE_PATH or install ngspice (or place binary in conda env bin)'
+        print(msg)
+        # Write a minimal op.txt so downstream code can detect missing simulation
+        with open(output_file, 'w') as f:
+            f.write(msg + "\n")
+        return False
+
+    # Run ngspice with the discovered binary
     try:
-        result = subprocess.run(['/home/chang/Documents/test/ngspice-44.2/release/src/ngspice', '-b', f'output/{filename}.cir'], capture_output=True, text=True)
-        ngspice_output = result.stdout
+        result = subprocess.run([ngspice_path, '-b', f'output/{filename}.cir'], capture_output=True, text=True)
+        ngspice_output = result.stdout + ('\n' + result.stderr if result.stderr else '')
         with open(output_file, "w") as f:
             f.write(ngspice_output)
     except Exception as e:
         ngspice_output = f"Error running NGspice: {str(e)}"
+        with open(output_file, "w") as f:
+            f.write(ngspice_output)
+        print(ngspice_output)
+        return False
 
-    print("NGspice output:")
-    #print(ngspice_output)
-
+    print("NGspice output written to", output_file)
+    return True
 
 """
 LLM can use this to decide which tool to call based on user input
@@ -1437,77 +1483,197 @@ print(sim_prompts_gen)
 tool = make_chat_completion_request_function(sizing_question)
 #%%
 def extract_tool_data(tool):
-    """Extract tool call data from all tool calls in the tool object."""
+    """Extract tool call data from all tool calls in the tool object.
+
+    Robust behavior and fallbacks:
+    - Safely parse `function.arguments` whether it's JSON, a concatenated JSON objects string, or a dict.
+    - If `simulation_tool` is missing, fallback to the tool-call function name or a sensible default ('run_ngspice').
+    - Return a list of normalized dicts with keys: simulation_type, analysis_type, simulation_tool, raw_args.
+    """
     message = tool.choices[0].message
     tool_data_list = []
-    for tool_call in message.tool_calls:
-        arguments = tool_call.function.arguments
-        # Handle cases where arguments might be a list or single JSON object
-        try:
-            # Try to parse as single JSON object first
-            data = json.loads(arguments)
-            tool_data_list.append(data)
-        except json.JSONDecodeError:
-            # If that fails, try to handle as multiple JSON objects
-            formatted_arguments = "[" + arguments.replace("}{", "},{") + "]"
-            tool_data_list.extend(json.loads(formatted_arguments))
+
+    # Helper to normalize a single parsed dict and a tool_call object
+    def _normalize(parsed_obj, tool_call_obj):
+        if not isinstance(parsed_obj, dict):
+            parsed_obj = {}
+        sim_type = parsed_obj.get("simulation_type")
+        analysis = parsed_obj.get("analysis_type")
+        sim_tool = parsed_obj.get("simulation_tool")
+
+        # Fallbacks for simulation_tool
+        if not sim_tool:
+            sim_tool = getattr(tool_call_obj.function, "name", None) \
+                       or getattr(tool_call_obj, "name", None) \
+                       or "run_ngspice"
+
+        return {
+            "simulation_type": sim_type,
+            "analysis_type": analysis,
+            "simulation_tool": sim_tool,
+            "raw_args": parsed_obj,
+        }
+
+    for tool_call in getattr(message, "tool_calls", []) or []:
+        arguments = getattr(tool_call.function, "arguments", None)
+
+        # If arguments is already a dict-like object
+        if isinstance(arguments, dict):
+            tool_data_list.append(_normalize(arguments, tool_call))
+            continue
+
+        # If arguments is a string, try several parse strategies
+        parsed = None
+        if isinstance(arguments, str):
+            arg_str = arguments.strip()
+            # Attempt JSON parse
+            try:
+                parsed = json.loads(arg_str)
+            except Exception:
+                # Try to coerce concatenated JSON objects into a list: '}{' -> '},{'
+                try:
+                    combined = "[" + arg_str.replace("}{", "},{") + "]"
+                    arr = json.loads(combined)
+                    if isinstance(arr, list):
+                        # normalize each item
+                        for item in arr:
+                            tool_data_list.append(_normalize(item, tool_call))
+                        continue
+                except Exception:
+                    parsed = None
+
+                # As a last resort, try a safe eval (very limited)
+                try:
+                    parsed = eval(arg_str, {"__builtins__": {}}, {})
+                except Exception:
+                    parsed = None
+
+        # If parsed successfully as a dict
+        if isinstance(parsed, dict):
+            tool_data_list.append(_normalize(parsed, tool_call))
+        elif parsed is None:
+            # No usable arguments -> still produce an entry with fallbacks
+            tool_data_list.append(_normalize({}, tool_call))
+
     return tool_data_list
 
+
+def _infer_simulation_type_from_analysis(analysis_type):
+    """Infer a simulation type from an analysis_type string or list when simulation_type is missing.
+
+    Rules (kept small and conservative):
+    - AC-related analyses => 'ac'
+    - transient analyses => 'transient'
+    - DC-related analyses => 'dc'
+    - If ambiguous or missing, default to 'dc' (safe choice for operating point checks).
+    """
+    if not analysis_type:
+        return None
+    if isinstance(analysis_type, list):
+        candidates = analysis_type
+    else:
+        candidates = [s.strip() for s in str(analysis_type).split(",") if s.strip()]
+
+    ac_keywords = {"ac_gain", "bandwidth", "unity_bandwidth", "phase_margin", "cmrr_tran", "cmrr"}
+    tran_keywords = {"tran_gain", "thd_input_range", "cmrr_tran"}
+    dc_keywords = {"output_swing", "offset", "ICMR", "power"}
+
+    for c in candidates:
+        if c in ac_keywords:
+            return "ac"
+    for c in candidates:
+        if c in tran_keywords:
+            return "transient"
+    for c in candidates:
+        if c in dc_keywords:
+            return "dc"
+
+    # default fallback
+    return None
+
+
 def format_simulation_types(tool_data_list):
-    """Format unique simulation types."""
+    """Format unique simulation types with robust fallbacks.
+
+    If `simulation_type` is missing, try to infer it from `analysis_type`. If still missing, default to 'dc'.
+    Returns a list of dicts like: {"name": "ac_simulation"}.
+    """
     unique_sim_types = set()
     formatted_output = []
     for tool_data in tool_data_list:
-        sim_type = tool_data["simulation_type"]
-        if sim_type not in unique_sim_types:
-            unique_sim_types.add(sim_type)
-            formatted_output.append({"name": f"{sim_type}_simulation"})
+        sim_type = tool_data.get("simulation_type")
+        if not sim_type:
+            sim_type = _infer_simulation_type_from_analysis(tool_data.get("analysis_type"))
+        if not sim_type:
+            sim_type = "dc"  # safe default
+
+        sim_name = f"{sim_type}_simulation"
+        if sim_name not in unique_sim_types:
+            unique_sim_types.add(sim_name)
+            formatted_output.append({"name": sim_name})
     return formatted_output
 
+
 def format_simulation_tools(tool_data_list):
-    """Format unique simulation tools."""
+    """Format unique simulation tools. Use fallbacks when fields are missing.
+
+    Returns a list of dicts like: {"name": "run_ngspice"}.
+    """
     unique_sim_tools = set()
     formatted_output = []
     for tool_data in tool_data_list:
-        sim_tool = tool_data["simulation_tool"]
+        sim_tool = tool_data.get("simulation_tool") or tool_data.get("raw_args", {}).get("simulation_tool")
+        if not sim_tool:
+            # fallback to any sensible metadata contained in raw_args or default
+            sim_tool = tool_data.get("raw_args", {}).get("tool") or tool_data.get("raw_args", {}).get("tool_name")
+        if not sim_tool:
+            sim_tool = "run_ngspice"
+
         if sim_tool not in unique_sim_tools:
             unique_sim_tools.add(sim_tool)
             formatted_output.append({"name": sim_tool})
     return formatted_output
 
+
 def format_analysis_types(tool_data_list):
-    """Format all analysis types from all tool calls, with cmrr_tran and thd_input_range at the end because they will change the simulation settings."""
+    """Format all analysis types from all tool calls, with cmrr_tran and thd_input_range appended last.
+
+    This function tolerates missing keys and accepts analysis_type as string or list.
+    """
     formatted_output = []
     cmrr_thd_items = []
-    
+
     for tool_data in tool_data_list:
-        # Skip if analysis_type is not present
-        if "analysis_type" not in tool_data:
-            continue
-            
-        analysis_type = tool_data["analysis_type"]
-        if isinstance(analysis_type, str):
-            # If it's a string, split by comma if needed
-            for analysis in analysis_type.split(","):
-                analysis = analysis.strip()
-                if analysis in ["cmrr_tran", "thd_input_range"]:
-                    cmrr_thd_items.append({"name": analysis})
-                else:
-                    formatted_output.append({"name": analysis})
-        elif isinstance(analysis_type, list):
-            # If it's already a list, add all items
-            for analysis in analysis_type:
-                if analysis in ["cmrr_tran", "thd_input_range"]:
-                    cmrr_thd_items.append({"name": analysis})
-                else:
-                    formatted_output.append({"name": analysis})
-        else:
-            # Single item
-            if analysis_type in ["cmrr_tran", "thd_input_range"]:
-                cmrr_thd_items.append({"name": analysis_type})
+        analysis_type = tool_data.get("analysis_type")
+        if not analysis_type:
+            # Nothing explicit — try to infer a reasonable analysis from simulation_type
+            sim_type = tool_data.get("simulation_type") or _infer_simulation_type_from_analysis(tool_data.get("analysis_type"))
+            if sim_type == "ac":
+                # default ac analyses when nothing provided
+                formatted_output.append({"name": "ac_gain"})
+                continue
+            elif sim_type == "transient":
+                formatted_output.append({"name": "tran_gain"})
+                continue
             else:
-                formatted_output.append({"name": analysis_type})
-    
+                # default dc analysis
+                formatted_output.append({"name": "output_swing"})
+                continue
+
+        # If analysis_type exists, normalize it
+        if isinstance(analysis_type, str):
+            analyses = [a.strip() for a in analysis_type.split(",") if a.strip()]
+        elif isinstance(analysis_type, list):
+            analyses = analysis_type
+        else:
+            analyses = [str(analysis_type)]
+
+        for analysis in analyses:
+            if analysis in ["cmrr_tran", "thd_input_range"]:
+                cmrr_thd_items.append({"name": analysis})
+            else:
+                formatted_output.append({"name": analysis})
+
     # Append cmrr and thd items at the end
     formatted_output.extend(cmrr_thd_items)
     return formatted_output
@@ -1529,11 +1695,6 @@ formatted_analysis_types = format_analysis_types(tool_data_list)
 # Step 3: Combine results
 tool_chain_row = combine_results(formatted_sim_types, formatted_sim_tools, formatted_analysis_types)
 tool_chain = {"tool_calls": tool_chain_row}
-
-# Step 4: Print the combined output
-print(tool_chain)
-print(type(tool_chain))
-#%%
 print("----------------------function used-----------------------------")
 print(tool_chain)
 sim_output, sim_netlist = tool_calling(tool_chain)
@@ -1542,16 +1703,16 @@ print(sim_output)
 print("-------------------------netlist---------------------------------")
 print(sim_netlist)
 #%% md
-## Optimization
+# ## Optimization
 #%%
 analysing_system_prompt = f""" 
 You are an expert at analogue circuit design. You are required to design CMOS amplifier. 
-Please analysis their difference, and conclude on the relationship between specific parameters and performance and tell me the conclusion. e.g. Increase W of current mirror can increase the gain.
+Please analysis the performance and the difference between component parameters. e.g. Increase W of current mirror can increase the gain.
 
 Let's think step by step to analysis the relationship:
 Step1: detect the parameter difference in the provided netlist and output which were changed.
 Step2: detect the performance difference.
-Step3: Analysis the performance with target values, are they passed or not, or close to the target. Please notice that all the value given to you is for the standerd unit, e.g bandwidth = 100 means 100Hz, power = 0.01 means 0.01W.
+Step3: Analysis the performance with target values, are they passed or not, or close to the target. Please notice that all the value given to you is for the standerd unit, e.g. bandwidth = 100 means 100Hz, power = 0.01 means 0.01W.
 Step4: Suggest possible relationship between different parameters and performance. You need to consider all the performance given to you. 
 Please consider each subcircuit (differential pair, current mirror, current source, load...) and each parameters (W, L, C...) seperately because they are always with different size and have different impact on different performance.
 
@@ -2011,3 +2172,64 @@ fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 0.92), ncol
 # Save the figure
 plt.savefig('railtorail_subplots_4x2_g1.pdf', format='pdf', bbox_inches='tight')
 plt.show()
+if __name__ == "__main__":
+    # Quick self-test for the tool parsing + formatting fallbacks
+    class FakeFunction:
+        def __init__(self, name=None, arguments=None):
+            self.name = name
+            self.arguments = arguments
+
+    class FakeToolCall:
+        def __init__(self, function):
+            self.function = function
+
+    class FakeMessage:
+        def __init__(self, tool_calls):
+            self.tool_calls = tool_calls
+
+    class FakeChoice:
+        def __init__(self, message):
+            self.message = message
+
+    class FakeResponse:
+        def __init__(self, choices):
+            self.choices = choices
+
+    # Case A: full arguments
+    f1 = FakeFunction(name="universal_circuit_tool", arguments='{"simulation_type": "ac", "analysis_type": "ac_gain", "simulation_tool": "run_ngspice"}')
+    # Case B: missing simulation_tool
+    f2 = FakeFunction(name="universal_circuit_tool", arguments='{"analysis_type": "tran_gain"}')
+    # Case C: arguments is empty string
+    f3 = FakeFunction(name="universal_circuit_tool", arguments='')
+    # Case D: concatenated JSON objects (two tool calls encoded in one string)
+    f4 = FakeFunction(name="universal_circuit_tool", arguments='{"analysis_type":"ac_gain"}{"analysis_type":"phase_margin"}')
+    # Case E: arguments is None
+    f5 = FakeFunction(name="universal_circuit_tool", arguments=None)
+
+    tool_calls = [FakeToolCall(f) for f in [f1, f2, f3, f4, f5]]
+    message = FakeMessage(tool_calls=tool_calls)
+    response = FakeResponse(choices=[FakeChoice(message=message)])
+
+    print("--- Running self-test for tool parsing ---")
+    tlist = extract_tool_data(response)
+    print("Extracted tool_data_list:")
+    print(json.dumps(tlist, indent=2))
+
+    sim_types = format_simulation_types(tlist)
+    sim_tools = format_simulation_tools(tlist)
+    analysis = format_analysis_types(tlist)
+
+    print("\nFormatted simulation types:")
+    print(sim_types)
+    print("\nFormatted simulation tools:")
+    print(sim_tools)
+    print("\nFormatted analysis types:")
+    print(analysis)
+
+    # Build tool_chain and show
+    tool_chain_row = combine_results(sim_types, sim_tools, analysis)
+    tool_chain = {"tool_calls": tool_chain_row}
+    print("\nCombined tool_chain:")
+    print(json.dumps(tool_chain, indent=2))
+
+    print("--- Self-test complete ---")
