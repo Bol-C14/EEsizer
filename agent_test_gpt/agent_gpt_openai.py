@@ -12,6 +12,7 @@ import csv
 import time
 import shutil
 import pandas as pd
+from pathlib import Path
 from openai import OpenAI
 from scipy.fft import fft, fftfreq
 #%%
@@ -24,6 +25,56 @@ load_dotenv()
 # Access the API URL and API key
 #api_base_url = os.getenv('API_URL')
 api_key = os.getenv('OPENAI_API_KEY')
+
+
+_INCLUDE_PATTERN = re.compile(r"^\s*\.include\s+['\"]?(?P<path>[^'\"\s]+)['\"]?", re.IGNORECASE | re.MULTILINE)
+
+
+def _resolve_spice_include_path(raw_path: str) -> str | None:
+    """Resolve a relative .include path against known project folders.
+
+    This keeps notebook-derived netlists (e.g. `.include 'ptm_90.txt'`) runnable
+    when executed from the repository root.
+    """
+
+    include_path = Path(raw_path)
+    if include_path.is_absolute():
+        return raw_path if include_path.exists() else None
+
+    cwd = Path.cwd()
+    if (cwd / include_path).exists():
+        return raw_path
+
+    search_roots = (
+        cwd / "agent_test_gpt",
+        cwd / "agent_test_gemini",
+        cwd / "agent_test_claude",
+        cwd / "legacy_notebook" / "agent_test_gpt",
+        cwd / "legacy_notebook" / "agent_test_gemini",
+        cwd / "legacy_notebook" / "agent_test_claude",
+        cwd / "variation",
+    )
+    for root in search_roots:
+        candidate = root / include_path
+        if candidate.exists():
+            try:
+                return str(candidate.relative_to(cwd))
+            except ValueError:
+                return str(candidate)
+    return None
+
+
+def normalize_spice_includes(netlist_text: str) -> str:
+    """Rewrite `.include` lines to point at resolvable files when possible."""
+
+    def _repl(match: re.Match[str]) -> str:
+        raw_path = match.group("path")
+        resolved = _resolve_spice_include_path(raw_path)
+        if not resolved or resolved == raw_path:
+            return match.group(0)
+        return match.group(0).replace(raw_path, resolved, 1)
+
+    return _INCLUDE_PATTERN.sub(_repl, netlist_text)
 
 #print(f"API URL: {api_base_url}")
 #print(f"API Key: {api_key}")
@@ -392,14 +443,29 @@ def nodes_extract(node):
         output_nodes = []
         source_names = []
 
-        # Step 4: Iterate through the "nodes" list
-        for node in node_name["nodes"]:
-            if "input_node" in node:
-                input_nodes.append(node["input_node"])
-            elif "output_node" in node:
-                output_nodes.append(node["output_node"])
-            elif "source_name" in node:
-                source_names.append(node["source_name"])
+        # Step 4: Iterate through the "nodes" list (support multiple schema variants)
+        for node_item in node_name.get("nodes", []):
+            if not isinstance(node_item, dict):
+                continue
+
+            # Legacy format: {"input_node": "in1"}, {"source_name": "Vid"}
+            if "input_node" in node_item:
+                input_nodes.append(node_item["input_node"])
+                continue
+            if "output_node" in node_item:
+                output_nodes.append(node_item["output_node"])
+                continue
+            if "source_name" in node_item:
+                source_names.append(node_item["source_name"])
+                continue
+
+            # Newer format: {"input_nodes": [..]}, {"source_names": [..]}
+            if "input_nodes" in node_item and isinstance(node_item["input_nodes"], list):
+                input_nodes.extend([str(x) for x in node_item["input_nodes"]])
+                continue
+            if "source_names" in node_item and isinstance(node_item["source_names"], list):
+                source_names.extend([str(x) for x in node_item["source_names"]])
+                continue
 
         # Step 5: Return the extracted lists
         return input_nodes, output_nodes, source_names
@@ -1232,21 +1298,33 @@ def convert_to_csv(input_txt, output_csv):
         headers = [str(item) for sublist in headers for item in sublist]
 
     num_columns = len(headers)
-    vth_rows_2d = [vth_rows[i:i+num_columns] for i in range(0, len(vth_rows), num_columns)]
-    vgs_rows_2d = [vgs_rows[i:i+num_columns] for i in range(0, len(vgs_rows), num_columns)]
+    if num_columns <= 0:
+        # Nothing to write; ngspice may have failed or the expected OP dump format isn't present.
+        with open(output_csv, "w", newline="") as outfile:
+            csv.writer(outfile).writerow([])
+        return False
+
+    vth_rows_2d = [vth_rows[i:i + num_columns] for i in range(0, len(vth_rows), num_columns)]
+    vgs_rows_2d = [vgs_rows[i:i + num_columns] for i in range(0, len(vgs_rows), num_columns)]
     with open(output_csv, "w", newline="") as outfile:
         csv_writer = csv.writer(outfile)
-        # Write the header row (device names)
         csv_writer.writerow(headers)
-        # Write the gm values (rows)
-        csv_writer.writerows(vth_rows_2d)   
-        csv_writer.writerows(vgs_rows_2d)      
+        if vth_rows_2d:
+            csv_writer.writerows(vth_rows_2d)
+        if vgs_rows_2d:
+            csv_writer.writerows(vgs_rows_2d)
+    return True
 
 def format_csv_to_key_value(input_csv, output_txt):
     try:
         with open(input_csv, "r") as infile:
             csv_reader = csv.reader(infile)
-            headers, vth_values, vgs_values = list(csv_reader)[:3]  # Read first 3 rows
+            rows = list(csv_reader)
+            if len(rows) < 3:
+                with open(output_txt, "w") as outfile:
+                    outfile.write("Vgs/Vth check not available (missing rows).")
+                return
+            headers, vth_values, vgs_values = rows[:3]  # Read first 3 rows
 
         filtered_lines = [
             f"vgs - vth value of {header}: {diff:.4f}"
@@ -1279,8 +1357,9 @@ def run_ngspice(circuit, filename):
     if not os.path.exists(out_dir):
         print(f'Path `{out_dir}` does not exist, creating it.')
         os.makedirs(out_dir, exist_ok=True)
+    normalized = normalize_spice_includes(circuit)
     with open(cir_path, 'w') as f:
-        f.write(circuit)
+        f.write(normalized)
 
     # Locate ngspice executable (robust search):
     # 1. Respect environment variable NGSPICE_PATH
@@ -1325,6 +1404,12 @@ def run_ngspice(circuit, filename):
         ngspice_output = result.stdout + ('\n' + result.stderr if result.stderr else '')
         with open(output_file, "w") as f:
             f.write(ngspice_output)
+        if result.returncode != 0:
+            print(f"NGspice failed with return code {result.returncode}")
+            return False
+        if "Could not find include file" in ngspice_output:
+            print("NGspice include resolution failed; see output/op.txt")
+            return False
     except Exception as e:
         ngspice_output = f"Error running NGspice: {str(e)}"
         with open(output_file, "w") as f:
@@ -1374,11 +1459,16 @@ def tool_calling(tool_chain):
             sim_netlist = trans_simulation(sim_netlist, source_names, output_nodes)
 
         elif tool_call['name'].lower() == "run_ngspice":
-            run_ngspice(sim_netlist, 'netlist')
-            filter_lines(input_txt, filtered_txt)
-            convert_to_csv(filtered_txt, output_csv)
-            format_csv_to_key_value(output_csv, output_txt)
-            vgscheck = read_txt_as_string(output_txt)
+            ok = run_ngspice(sim_netlist, 'netlist')
+            if ok:
+                filter_lines(input_txt, filtered_txt)
+                if convert_to_csv(filtered_txt, output_csv):
+                    format_csv_to_key_value(output_csv, output_txt)
+                    vgscheck = read_txt_as_string(output_txt)
+                else:
+                    vgscheck = "Vgs/Vth check not available (no parsed devices)."
+            else:
+                vgscheck = "NGspice run failed; Vgs/Vth check not available."
             #print(vgscheck)
 
         elif tool_call['name'].lower() == "ac_gain":   
@@ -1506,6 +1596,10 @@ def extract_tool_data(tool):
             sim_tool = getattr(tool_call_obj.function, "name", None) \
                        or getattr(tool_call_obj, "name", None) \
                        or "run_ngspice"
+
+        # Notebook schema uses a single wrapper tool name; map it to our local runner.
+        if str(sim_tool).lower() == "universal_circuit_tool":
+            sim_tool = "run_ngspice"
 
         return {
             "simulation_type": sim_type,
@@ -1793,6 +1887,8 @@ def optimization(tools, target_values, sim_netlist, extracting_method):
     previous_results_list =[]
     previous_results = [f"{sim_output}, " + f",the netlist is {opti_netlist}"]
     previous_results_list.append(f"{sim_output}, " + f",the netlist is {opti_netlist}")
+
+    os.makedirs("output/90nm", exist_ok=True)
 
     with open("output/90nm/result_history.txt", 'w') as f:
         pass   # file is now empty
