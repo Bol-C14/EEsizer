@@ -2,7 +2,6 @@
 import subprocess
 import numpy as np
 import matplotlib.pyplot as plt
-import openai
 import requests
 import re
 import boto3
@@ -13,9 +12,12 @@ import time
 import shutil
 import pandas as pd
 from pathlib import Path
-from openai import OpenAI
 from scipy.fft import fft, fftfreq
 from agent_test_gpt import prompts
+from agent_test_gpt.llm_client import (
+    make_chat_completion_request,
+    make_chat_completion_request_function,
+)
 #%%
 from dotenv import load_dotenv
 import os
@@ -79,144 +81,6 @@ def normalize_spice_includes(netlist_text: str) -> str:
 
 #print(f"API URL: {api_base_url}")
 #print(f"API Key: {api_key}")
-#%%
-"""
-所有的LLM都走的这个接口调用LLM Provider
-单接口，无构造
-
-TODO: hardcoded fileds like model, api_base_url and api_key for now
-
-@ param prompt: str, 用户输入的prompt
-@ return: str, LLM返回的内容
-"""
-
-
-def make_chat_completion_request(prompt):
-    # The base URL for your local server (note the trailing slash)
-    #print("Generated API key:", api_key)
-    
-    # Step 2: Configure OpenAI client to use your custom endpoint
-    #openai.base_url = api_base_url  # Ensure trailing slash here
-    #openai.api_key = api_key
-    client = OpenAI()
-
-    # Optional: If you need to pass organization or project headers, you can do so.
-    # For example:
-    # openai.organization = "YOUR_ORG_ID"
-    # openai.default_project = "YOUR_PROJECT_ID"
-
-    # Step 3: Call the Chat Completions API with streaming enabled
-    print("Making ChatCompletion request with streaming enabled...")
-    try:
-        response = client.chat.completions.create(
-            # model="anthropic.claude-3-haiku-20240307-v1:0",
-            # model="gpt-4o-mini",
-            #model="gemini-2.0-flash-001",
-            # model="gpt-4.1",
-            model="o3-2025-04-16",
-            #model= "gpt-oss-120b",
-            #reasoning={"effort": "medium"},
-            messages=[{"role": "user", "content": prompt}],
-            temperature=1,
-            stream=True,
-            max_completion_tokens=20000,
-        )
-    except Exception as e:
-        print("Error making API call:", e)
-        return
-    
-    generated_content = " "
-    print("Streaming response:")
-    for chunk in response:
-        # Each 'chunk' is a dict similar to what the OpenAI API returns.
-        if chunk.choices[0].delta.content is not None:
-            content = chunk.choices[0].delta.content
-            print(content, end="")
-            generated_content += content
-
-    return generated_content
-#%%
-f""" Function calling method for LLM, so far only one ##run_ngspice##
-
-TODO - Hardcoded fields , e.g. model name, tool name etc.
-
-@ param prompt: str, 用户输入的prompt
-@ return: str, LLM返回的内容
-"""
-def make_chat_completion_request_function(prompt):
-    # The base URL for your local server (note the trailing slash)
-    #print("Generated API key:", api_key)
-    
-    # Step 2: Configure OpenAI client to use your custom endpoint
-    #openai.base_url = api_base_url  # Ensure trailing slash here
-    #openai.api_key = api_key
-    client = OpenAI()
-
-    # Optional: If you need to pass organization or project headers, you can do so.
-    # For example:
-    # openai.organization = "YOUR_ORG_ID"
-    # openai.default_project = "YOUR_PROJECT_ID"
-
-    # Step 3: Call the Chat Completions API with streaming enabled
-    print("Making ChatCompletion request with function calling enabled...")
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "universal_circuit_tool",
-                "description": (
-                    "A unified tool that enables simulation and analysis of analog and mixed-signal (AMS) circuits. "
-                    "It supports multiple functions including DC, AC, and transient simulations, as well as performance "
-                    "analysis such as gain, bandwidth, phase margin, power consumption, and more."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "simulation_type": {
-                            "type": "string",
-                            "enum": ["dc", "ac", "transient"],
-                            "description": "Type of simulation to run: DC, AC, or transient."
-                        },
-                        "analysis_type": {
-                            "type": "string",
-                            "enum": [
-                                "ac_gain", "output_swing", "offset", "ICMR", "tran_gain",
-                                "bandwidth", "unity_bandwidth", "phase_margin", "power",
-                                "thd_input_range", "cmrr_tran"
-                            ],
-                            "description": "Type of analysis to perform on the simulation results."
-                        },
-                        "simulation_tool": {
-                            "type": "string",
-                            "enum": ["run_ngspice"],
-                            "description": "Name of the SPICE simulation tool to use (e.g., run_ngspice)."
-                        }
-                    },
-                    "required": []
-                }
-            }
-        }
-    ]
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4.1",
-            #model="o3-2025-04-16",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=1,
-            stream=False,
-            tools=tools,
-            tool_choice="required"
-        )
-    except Exception as e:
-        print("Error making API call:", e)
-        return
-    
-    # Step 4: Print the complete JSON response.
-    print("Non-streaming response:")
-    print(response)
-
-    return response
 #%% md
 # ## User Input
 #%%
@@ -954,100 +818,6 @@ def cmrr_tran(netlist):
     cmrr_ac_max = np.max(cmrr_val)
 
     return cmrr_ac,cmrr_ac_max
-
-"""def thd_input_range(filename):
-    thd_values = []
-    valid_inputs = []
-    threshold_thd = -24.7
-    #read origin netlist
-    with open('output/netlist.cir', 'r') as file:
-      netlist0 = file.read()
-    #replace the simulation setting 
-    modified_netlist = re.sub(r'\.control.*?\.endc', '', netlist0, flags=re.DOTALL)
-    updated_lines = []
-    for line in modified_netlist.splitlines():
-        if line.startswith("M4") or line.startswith("M1"):
-            line = re.sub(r'\bin1\b', 'out', line)  # Replace 'in1' with 'out'
-        elif line.startswith("Vid"):
-            line = 'Vid diffin 0 AC 1 SIN (0 0.6 10k 0 0)\n'
-        #if not (line.startswith("Rl") or line.startswith("Cl")):  # Skip lines starting with "Rl" or "Cl"
-        updated_lines.append(line)
-
-    updated_netlist = '\n'.join(updated_lines)
-    simulation_commands = f'''
-    .control
-      tran 50n 1m 
-        wrdata output/output_tran_inrange.dat out in1 in2 
-    .endc
-     '''
-    end_index = updated_netlist.index('.end')
-    new_netlist = updated_netlist[:end_index] + simulation_commands + updated_netlist[end_index:]
-    #print(netlist_inrange)
-    run_ngspice(new_netlist, 'netlist_inrange')
-
-    #data preperation
-    data_tran = np.genfromtxt(f'output/{filename}_inrange.dat')
-    in2 = data_tran[:,5]
-    time = data_tran[:,0]
-    out = data_tran[:,1]
-    other_data = data_tran[:, 1:]  # Extract other columns
-
-    iteration_indices = np.where(time == 0)[0]
-    batch_numbers = np.zeros_like(time, dtype=int)
-    # Assign batch numbers based on iteration resets
-    for i, idx in enumerate(iteration_indices):
-      batch_numbers[idx:] = i
-    # Create a DataFrame with batch information
-    columns = ['time', 'batch'] + [f'col_{i}' for i in range(1, other_data.shape[1] + 1)]
-    data_with_batches = np.column_stack((time, batch_numbers, other_data))
-    df = pd.DataFrame(data_with_batches, columns=columns)
-
-    #fft
-    #plt.figure(figsize=(12, 8))
-    for batch, group in df.groupby('batch'):
-      time = group['time'].reset_index(drop=True).to_numpy()  
-      #print(time)
-      output = group['col_1'].reset_index(drop=True).to_numpy()    
-      output_nodc = output - np.mean(output)
-      
-      #print(output)
-      # Calculate the sampling frequency (Fs)
-      time_intervals = 5e-8
-      fs = 1 / time_intervals  # Sampling frequency in Hz
-    
-      N = len(output)  # Length of the signal
-      fft_values = fft(output_nodc)
-      fft_magnitude = np.abs(fft_values[:N//2])  # Take magnitude of FFT values (only positive frequencies)
-      fft_freqs = fftfreq(N, d=1/fs)[:N//2]  # Corresponding frequency values (only positive frequencies)
-
-      # Identify the fundamental frequency (largest peak)
-      fundamental_idx = np.argmax(fft_magnitude)
-      fundamental_freq = fft_freqs[fundamental_idx]
-      fundamental_amplitude = fft_magnitude[fundamental_idx]
-
-      # Calculate harmonic amplitudes (sum magnitudes of multiples of the fundamental frequency)
-      harmonics_amplitude = 0
-      for i in range(2, N // fundamental_idx):  # Start from second harmonic
-          idx = i * fundamental_idx
-          if idx < len(fft_magnitude):  # Ensure the index is within bounds
-              harmonics_amplitude = harmonics_amplitude + fft_magnitude[idx] ** 2
-
-      harmonics_rms = np.sqrt(harmonics_amplitude)
-
-      # Calculate Total Harmonic Distortion (THD)
-      if fundamental_amplitude == 0:
-          fundamental_amplitude = 1e-6
-          
-      thd_db = 20 * np.log10(harmonics_rms / fundamental_amplitude)
-
-      thd_values.append(thd_db)
-
-    thd = np.max(thd_values)
-    print(thd)
-    #print(valid_inputs)
-    input_ranges = [(0, 0)]
-    
-    return thd, input_ranges"""
 
 def thd_input_range(filename):
     thd_values = []
