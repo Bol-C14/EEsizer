@@ -31,6 +31,15 @@ from agent_test_gpt.netlist_utils import (
     extract_code,
     extract_number,
 )
+from agent_test_gpt.optimization import (
+    ToolCallingContext,
+    ToolCallingDeps,
+    ToolChainRunner,
+    OptimizationContext,
+    OptimizationDeps,
+    OptimizationConfig,
+    OptimizationRunner,
+)
 #%%
 from dotenv import load_dotenv
 import os
@@ -996,110 +1005,64 @@ here we have: dc_simulation, ac_simulation, transient_simulation, run_ngspice, a
 
 """
 def tool_calling(tool_chain):
-    global Gain_init, Bw_init, Pm_init, Dc_Gain_init,Tran_Gain_init, CMRR_init, Power_init, InputRange_Init,Thd_init, OW_init, Offset_init, UBw_init, ICMR_init
-    gain = None
-    Dc_gain = None
-    tr_gain = None
-    ow = None
-    Offset = None
-    bw = None
-    ubw = None
-    pm = None
-    cmrr = None
-    pr = None
-    ir = None
-    thd = None
-    icmr = None
-    sim_netlist = netlist
+    global Gain_init, Bw_init, Pm_init, Dc_Gain_init, Tran_Gain_init, CMRR_init, Power_init, InputRange_Init, Thd_init, OW_init, Offset_init, UBw_init, ICMR_init
 
-    input_txt = "output/op.txt"   # Replace with your actual input file
-    filtered_txt = "output/vgscheck.txt"
-    output_csv = "output/vgscheck.csv"
-    output_txt = "output/vgscheck_output.txt"
-    
-    for tool_call in tool_chain['tool_calls']:
-        if tool_call['name'].lower() == "dc_simulation":
-            sim_netlist = dc_simulation(sim_netlist, source_names, output_nodes)
+    context = ToolCallingContext(
+        netlist=netlist,
+        source_names=source_names,
+        output_nodes=output_nodes,
+    )
+    deps = ToolCallingDeps(
+        dc_simulation=dc_simulation,
+        ac_simulation=ac_simulation,
+        trans_simulation=trans_simulation,
+        run_ngspice=run_ngspice,
+        filter_lines=filter_lines,
+        convert_to_csv=convert_to_csv,
+        format_csv_to_key_value=format_csv_to_key_value,
+        read_txt_as_string=read_txt_as_string,
+        ac_gain=ac_gain,
+        out_swing=out_swing,
+        ICMR=ICMR,
+        offset=offset,
+        tran_gain=tran_gain,
+        bandwidth=bandwidth,
+        unity_bandwidth=unity_bandwidth,
+        phase_margin=phase_margin,
+        cmrr_tran=cmrr_tran,
+        stat_power=stat_power,
+        thd_input_range=thd_input_range,
+    )
+    runner = ToolChainRunner(context, deps)
+    result = runner.run(tool_chain)
 
-        elif tool_call['name'].lower() == "ac_simulation":
-            sim_netlist = ac_simulation(sim_netlist, source_names, output_nodes)
-            print(f"ac_netlist:{sim_netlist}")
+    metrics = result.metrics
+    if metrics["gain"] is not None:
+        Gain_init = metrics["gain"]
+    if metrics["output_swing"] is not None:
+        OW_init = metrics["output_swing"]
+    if metrics["icmr"] is not None:
+        ICMR_init = metrics["icmr"]
+    if metrics["offset"] is not None:
+        Offset_init = metrics["offset"]
+    if metrics["tran_gain"] is not None:
+        Tran_Gain_init = metrics["tran_gain"]
+    if metrics["bandwidth"] is not None:
+        Bw_init = metrics["bandwidth"]
+    if metrics["unity_bandwidth"] is not None:
+        UBw_init = metrics["unity_bandwidth"]
+    if metrics["phase_margin"] is not None:
+        Pm_init = metrics["phase_margin"]
+    if metrics["cmrr"] is not None:
+        CMRR_init = metrics["cmrr"]
+    if metrics["power"] is not None:
+        Power_init = metrics["power"]
+    if metrics["thd"] is not None:
+        Thd_init = metrics["thd"]
+    if metrics["input_range"] is not None:
+        InputRange_Init = metrics["input_range"]
 
-        elif tool_call['name'].lower() == "transient_simulation":
-            sim_netlist = trans_simulation(sim_netlist, source_names, output_nodes)
-
-        elif tool_call['name'].lower() == "run_ngspice":
-            ok = run_ngspice(sim_netlist, 'netlist')
-            if ok:
-                filter_lines(input_txt, filtered_txt)
-                if convert_to_csv(filtered_txt, output_csv):
-                    format_csv_to_key_value(output_csv, output_txt)
-                    vgscheck = read_txt_as_string(output_txt)
-                else:
-                    vgscheck = "Vgs/Vth check not available (no parsed devices)."
-            else:
-                vgscheck = "NGspice run failed; Vgs/Vth check not available."
-            #print(vgscheck)
-
-        elif tool_call['name'].lower() == "ac_gain":   
-            gain = ac_gain('output_ac')
-            Gain_init = gain
-            print(f"ac_gain result: {gain}")   
-
-        elif tool_call['name'].lower() == "output_swing":   
-            ow = out_swing('output_dc')
-            OW_init = ow
-            print(f"output swing result: {ow}") 
-        
-        elif tool_call['name'].lower() == "icmr":   
-            icmr = ICMR('output_dc')
-            ICMR_init = icmr
-            print(f"input common mode voltage result: {icmr}")
-        
-        elif tool_call['name'].lower() == "offset":   
-            Offset = offset('output_dc')
-            Offset_init = Offset
-            print(f"input offset result: {Offset}")
-
-        elif tool_call['name'].lower() == "tran_gain":   
-            tr_gain = tran_gain('output_tran')
-            Tran_Gain_init = tr_gain
-            print(f"tran_gain result: {tr_gain}")
-
-        elif tool_call['name'].lower() == "bandwidth":
-            bw = bandwidth('output_ac')
-            Bw_init = bw
-            print(f"bandwidth result: {bw}")
-
-        elif tool_call['name'].lower() == "unity_bandwidth":
-            ubw = unity_bandwidth('output_ac')
-            UBw_init = ubw
-            print(f"unity bandwidth result: {ubw}")
-
-        elif tool_call['name'].lower() == "phase_margin":
-            pm = phase_margin('output_ac')
-            Pm_init = pm
-            print(f"phase margin: {pm}")
-
-        elif tool_call['name'].lower() == "cmrr_tran":
-            cmrr,cmrr_max = cmrr_tran(sim_netlist)
-            CMRR_init = cmrr
-            print(f"cmrr: {cmrr}, cmrr_max: {cmrr_max}")
-
-        elif tool_call['name'].lower() == "power":
-            pr = stat_power('output_tran')
-            Power_init = pr
-            print(f"power: {pr}")
-        
-        elif tool_call['name'].lower() == "thd_input_range":
-            thd, ir= thd_input_range('output_tran')
-            Thd_init = thd
-            InputRange_Init = ir
-            print(f"thd is {thd}")
-
-    sim_output = f"Transistors below vth: {vgscheck}," +  f"ac_gain is {gain}, " + f"tran_gain is {tr_gain}, " +  f"output swing is {ow}, " +  f"input offset is {Offset}, " +  f"input common mode voltage range is {icmr}, " + f"unity bandwidth is {ubw}, " + f"phase margin is {pm}, " + f"power is {pr}, " + f"cmrr is {cmrr},cmrr_max is {cmrr_max}," + f"thd is {thd},"
-    
-    return sim_output, sim_netlist
+    return result.sim_output, result.sim_netlist
 
 print(sim_question)
 #%%
@@ -1139,320 +1102,51 @@ sizing_Question = f"Currently, {sim_output}. " + sizing_question
 print(sizing_Question)
 #%%
 def optimization(tools, target_values, sim_netlist, extracting_method):
-    max_iterations = 25
-    tolerance = 0.05  # 5% tolerance
-    iteration = 0
-    converged = False
+    context = OptimizationContext(
+        sim_output=sim_output,
+        sizing_question=sizing_question,
+        type_identified=type_identified,
+    )
 
-    gain_output = None
-    tr_gain_output = None
-    dc_gain_output = None
-    bw_output = None
-    ubw_output = None
-    ow_output = None
-    pm_output = None
-    cmrr_output = None
-    pr_output = None
-    thd_output = None
-    offset_output = None
-    icmr_output = None
+    def _missing_dc_gain(*_args, **_kwargs):
+        raise NameError("name 'dc_gain' is not defined")
 
-    input_txt = "output/op.txt"   # Replace with your actual input file
-    filtered_txt = "output/vgscheck.txt"
-    output_csv = "output/vgscheck.csv"
-    output_txt = "output/vgscheck_output.txt"
-
-    opti_output = None
-    opti_netlist = sim_netlist
-    previous_results_list =[]
-    previous_results = [f"{sim_output}, " + f",the netlist is {opti_netlist}"]
-    previous_results_list.append(f"{sim_output}, " + f",the netlist is {opti_netlist}")
-
-    os.makedirs("output/90nm", exist_ok=True)
-
-    with open("output/90nm/result_history.txt", 'w') as f:
-        pass   # file is now empty
-
-    with open("output/90nm/result_history.txt", 'w') as f:
-            f.write(str(previous_results))
-
-    gain_output_list = []
-    dc_gain_output_list = []
-    tr_gain_output_list = []
-    bw_output_list = []
-    ubw_output_list = []
-    ow_output_list = []
-    pm_output_list = []
-    pr_output_list = []
-    cmrr_output_list = []
-    thd_output_list = []
-    offset_output_list = []
-    icmr_output_list = []
-    
-    target_values = target_values.strip().strip('`')  # Remove leading/trailing backticks and whitespace
-    target_values = target_values.replace("json", "").strip()  # Remove the word "json" and any extra whitespace
-
-    # Step 2: Parse the JSON string into a dictionary
-    target_output = json.loads(target_values)
-    for dict in target_output["target_values"]:
-        for key, value in dict.items():
-            globals()[key] = value
-    
-    gain_target = extracting_method(globals().get('ac_gain_target', '0')) if 'ac_gain_target' in globals() else None
-    bandwidth_target = extracting_method(globals().get('bandwidth_target', '0')) if 'bandwidth_target' in globals() else None
-    unity_bandwidth_target = extracting_method(globals().get('unity_bandwidth_target', '0')) if 'unity_bandwidth_target' in globals() else None
-    phase_margin_target = extracting_method(globals().get('phase_margin_target', '0')) if 'phase_margin_target' in globals() else None
-    tr_gain_target = extracting_method(globals().get('transient_gain_target', '0')) if 'transient_gain_target' in globals() else None
-    input_offset_target = extracting_method(globals().get('input_offset_target', '0')) if 'input_offset_target' in globals() else None
-    output_swing_target = extracting_method(globals().get('output_swing_target', '0')) if 'output_swing_target' in globals() else None
-    pr_target = extracting_method(globals().get('power_target', '0')) if 'power_target' in globals() else None
-    cmrr_target = extracting_method(globals().get('cmrr_target', '0')) if 'cmrr_target' in globals() else None
-    thd_target = -np.abs(extracting_method(globals().get('thd_target', '0')) if 'thd_target' in globals() else None)
-    icmr_target = extracting_method(globals().get('input_common_mode_range_target', '0')) if 'input_common_mode_range_target' in globals() else None
-
-
-    gain_pass = True if gain_target not in globals() or gain_target is None else False
-    tr_gain_pass = True if tr_gain_target not in globals() or tr_gain_target is None else False
-    dc_gain_pass = True if tr_gain_target not in globals() or tr_gain_target is None else False
-    ow_pass = True if output_swing_target not in globals() or output_swing_target is None else False
-    bw_pass = True if bandwidth_target not in globals() or bandwidth_target is None else False
-    ubw_pass = True if unity_bandwidth_target not in globals() or unity_bandwidth_target is None else False
-    pm_pass = True if phase_margin_target not in globals() or phase_margin_target is None else False
-    pr_pass = True if pr_target not in globals() or pr_target is None else False
-    cmrr_pass = True if cmrr_target not in globals() or cmrr_target is None else False
-    thd_pass = True if thd_target not in globals() or thd_target is None else False
-    input_offset_pass = True if input_offset_target not in globals() or input_offset_target is None else False
-    icmr_pass = True if icmr_target not in globals() or icmr_target is None else False
-
-    sizing_Question = f"Currently, {sim_output}. " + sizing_question
-
-    
-
-    while iteration < max_iterations and not converged:
-        time.sleep(20)
-        with open("output/90nm/result_history.txt", 'r') as f:
-            previous_results = f.read()
-        print(f"----------------------iter = {iteration}-----------------------------")
-        #print(f"previous_results:{previous_results}")
-        #######################observation#########################
-        analysising_prompt = prompts.build_analysis_prompt(previous_results, sizing_question)
-        analysis = make_chat_completion_request(analysising_prompt)
-        print(analysis)
-        #analysis_content = analysis["text"]
-        ##########################analysis#######################
-        time.sleep(10)
-        optimising_prompt = prompts.build_optimising_prompt(type_identified, analysis, previous_results)
-        optimising = make_chat_completion_request(optimising_prompt)
-        print(optimising)
-        ###########################sizing/optimising######################
-        time.sleep(10)
-        sizing_prompt = prompts.build_sizing_prompt(sizing_Question, opti_netlist, optimising)
-        modified = make_chat_completion_request(sizing_prompt)
-        print(modified)
-        modified_output = modified
-        print("----------------------Modified-----------------------------")
-        print(modified_output)
-        time.sleep(10)
-        ###########################function calling######################
-        print("------------------------result-----------------------------")
-        for tool_call in tools['tool_calls']:
-            opti_netlist = extract_code(modified_output)
-            print(opti_netlist)
-
-            if tool_call['name'].lower() == "run_ngspice":
-                run_ngspice(opti_netlist, 'netlist')
-                print("running ngspice")
-                filter_lines(input_txt, filtered_txt)
-                convert_to_csv(filtered_txt, output_csv)
-                format_csv_to_key_value(output_csv, output_txt)
-                vgscheck = read_txt_as_string(output_txt)
-        
-            elif tool_call['name'].lower() == "ac_gain":
-                #run_ngspice(sim_netlist)
-                gain_output = ac_gain('output_ac')
-                #print(f"ac_gain result: {gain_output}") 
-
-            elif tool_call['name'].lower() == "dc_gain":
-                #run_ngspice(sim_netlist)
-                dc_gain_output = dc_gain('output_dc')
-                #print(f"ac_gain result: {gain_output}")
-
-            elif tool_call['name'].lower() == "output_swing":
-                #run_ngspice(sim_netlist)
-                ow_output = out_swing('output_dc')
-                #print(f"ac_gain result: {gain_output}")
-
-            elif tool_call['name'].lower() == "offset":
-                #run_ngspice(sim_netlist)
-                offset_output = offset('output_dc')
-
-            elif tool_call['name'].lower() == "icmr":
-                #run_ngspice(sim_netlist)
-                icmr_output = ICMR('output_dc')
-
-            elif tool_call['name'].lower() == "tran_gain":
-                #run_ngspice(sim_netlist)
-                tr_gain_output = tran_gain('output_tran')
-                #print(f"ac_gain result: {gain_output}")
-
-            elif tool_call['name'].lower() == "bandwidth":
-                #run_ngspice(sim_netlist)
-                bw_output = bandwidth('output_ac')
-                #print(f"bandwidth result: {bw_output}")
-
-            elif tool_call['name'].lower() == "unity_bandwidth":
-                #run_ngspice(sim_netlist)
-                ubw_output = unity_bandwidth('output_ac')
-                #print(f"bandwidth result: {bw_output}")
-
-            elif tool_call['name'].lower() == "phase_margin":
-                #run_ngspice(sim_netlist)
-                pm_output = phase_margin('output_ac')
-                #print(f"phase margin result: {pm_output}")
-
-            elif tool_call['name'].lower() == "power":
-                #run_ngspice(sim_netlist)
-                pr_output = stat_power('output_tran')
-                #print(f"phase margin result: {pm_output}")
-
-            elif tool_call['name'].lower() == "thd_input_range":
-                #run_ngspice(sim_netlist)
-                thd_output, ir_output = thd_input_range('output_tran')
-
-            elif tool_call['name'].lower() == "cmrr_tran":
-                #run_ngspice(sim_netlist)
-                cmrr_output,cmrr_max = cmrr_tran(opti_netlist)
-
-            
-        
-        #print(vgscheck)
-            
-        opti_output = f"Transistors below vth: {vgscheck}," + f"ac_gain is {gain_output} dB, " + f"tran_gain is {tr_gain_output} dB, " + f"output_swing is {ow_output}, " + f"input offset is {offset_output}, " + f"input common mode voltage range is {icmr_output}, "  + f"unity bandwidth is {ubw_output}, " + f"phase margin is {pm_output}, " + f"power is {pr_output}, " + f"cmrr is {cmrr_output} cmrr max is {cmrr_max}," + f"thd is {thd_output}," 
-
-        #save the output value in a list
-        gain_output_list.append(gain_output)
-        tr_gain_output_list.append(tr_gain_output)
-        dc_gain_output_list.append(dc_gain_output)
-        ow_output_list.append(ow_output)
-        bw_output_list.append(bw_output)
-        ubw_output_list.append(ubw_output)
-        pm_output_list.append(pm_output)
-        pr_output_list.append(pr_output)
-        cmrr_output_list.append(cmrr_output)
-        thd_output_list.append(thd_output)
-        offset_output_list.append(offset_output)
-        icmr_output_list.append(icmr_output)
-                    
-        print(opti_output)
-
-        #comparison
-        if gain_target is not None:
-            if gain_output >= gain_target - gain_target * tolerance:
-                gain_pass = True
-            else:
-                gain_pass = False
-
-        if tr_gain_target is not None:
-            if tr_gain_output >= tr_gain_target - tr_gain_target * tolerance:
-                tr_gain_pass = True
-            else:
-                tr_gain_pass = False
-
-        if output_swing_target is not None:
-            if ow_output >= output_swing_target - output_swing_target * tolerance:
-                ow_pass = True
-            else:
-                ow_pass = False
-
-        if input_offset_target is not None:
-            if offset_output <= input_offset_target - input_offset_target * tolerance:
-                input_offset_pass = True
-            else:
-                input_offset_pass = False     
-
-        if icmr_target is not None:
-            if icmr_output >= icmr_target - icmr_target * tolerance:
-                icmr_pass = True
-            else:
-                icmr_pass = False   
-        
-        if bandwidth_target is not None:
-            if bw_output >= bandwidth_target - bandwidth_target * tolerance:
-                bw_pass = True
-            else:
-                bw_pass = False
-
-        if unity_bandwidth_target is not None:
-            if ubw_output >= unity_bandwidth_target - unity_bandwidth_target * tolerance:
-                ubw_pass = True
-            else:
-                ubw_pass = False
-
-        if phase_margin_target is not None:
-            if pm_output >= phase_margin_target - phase_margin_target * tolerance:
-                pm_pass = True
-            else:
-                pm_pass = False
-
-        if pr_target is not None:
-            if pr_output <= pr_target + pr_target * tolerance:
-                pr_pass = True
-            else:
-                pr_pass = False
-
-        if cmrr_target is not None:
-            if cmrr_output >= cmrr_target - cmrr_target * tolerance:
-                cmrr_pass = True
-            else:
-                cmrr_pass = False
-
-        if thd_target is not None:
-            if thd_output <= thd_target + np.abs(thd_target) * tolerance:
-                thd_pass = True
-            else:
-                thd_pass = False
-
-
-        if gain_pass and ubw_pass and pm_pass and tr_gain_pass and pr_pass and cmrr_pass and dc_gain_pass and thd_pass and ow_pass and input_offset_pass and icmr_pass and vgscheck == "No values found where vgs - vth < 0.":
-            converged = True
-
-        sizing_Question = f"Currently,{opti_output}" + sizing_question
-        pass_or_not = f"gain_pass:{gain_pass},tr_gain_pass:{tr_gain_pass},output_swing_pass:{ow_pass},input_offset_pass:{input_offset_pass}, icmr_pass:{icmr_pass}, unity_bandwidth_pass:{ubw_pass}, phase_margin_pass:{pm_pass}, power_pass:{pr_pass}, cmrr_pass:{cmrr_pass} , thd_pass:{thd_pass}"
-        iteration += 1
-        previous_results_list.append(f"Currently, {opti_output}, {pass_or_not},the netlist is {opti_netlist}")
-        if len(previous_results_list) > 5:
-            previous_results_list.pop(0)  # Remove the oldest result
-        
-        #store the his tory in a file
-        with open("output/90nm/result_history.txt", 'w') as f:
-            f.write(str(previous_results_list))
-
-        print(f"gain_target:{gain_target}, tr_gain_target:{tr_gain_target},output_swing_target:{output_swing_target}, input_offset_target:{input_offset_target}, icmr_target:{icmr_target}, unity_bandwidth_target:{unity_bandwidth_target}, phase_margin_target:{phase_margin_target}, power_target:{pr_target}, cmrr_target:{cmrr_target}, thd_target:{thd_target}")
-        print(f"gain_pass:{gain_pass},tr_gain_pass:{tr_gain_pass},output_swing_pass:{ow_pass},input_offset_pass:{input_offset_pass}, icmr_pass:{icmr_pass}, unity_bandwidth_pass:{ubw_pass}, phase_margin_pass:{pm_pass}, power_pass:{pr_pass}, cmrr_pass:{cmrr_pass} , thd_pass:{thd_pass}")
-    ##########################################################################################################
-    # save the value in file
-    file_empty = not os.path.exists('output/90nm/g2_o3.csv') or os.stat('output/90nm/g2_o3.csv').st_size == 0
-    with open('output/90nm/g2_o3.csv', 'a', newline='') as csvfile:
-        fieldnames = ['iteration', 'gain_output', 'tr_gain_output', 'output_swing_output', 'input_offset_output',  'icmr_output', 'ubw_output', 'pm_output', 'pr_output', 'cmrr_output', 'thd_output' ]
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        if file_empty:
-            writer.writeheader()
-        writer.writerow({'iteration': 0, 'gain_output': Gain_init,'tr_gain_output': Tran_Gain_init, 'output_swing_output': OW_init, 'input_offset_output': Offset_init, 'icmr_output': ICMR_init, 'ubw_output': UBw_init, 'pm_output': Pm_init, 'pr_output':Power_init, 'cmrr_output': CMRR_init, 'thd_output': Thd_init})
-        for i in range(len(gain_output_list)):
-            writer.writerow({'iteration': i+1, 'gain_output': gain_output_list[i], 'tr_gain_output': tr_gain_output_list[i], 'output_swing_output': ow_output_list[i], 'input_offset_output': offset_output_list[i], 'icmr_output': icmr_output_list[i], 'ubw_output': ubw_output_list[i], 'pm_output': pm_output_list[i], 'pr_output': pr_output_list[i], 'cmrr_output': cmrr_output_list[i], 'thd_output': thd_output_list[i] })
-
-    return {'converged': converged, 
-            'iterations': iteration, 
-            'gain_output': gain_output if 'gain_output' in locals() else None, 
-            'tr_gain_output': tr_gain_output if 'tr_gain_output' in locals() else None,
-            'output_swing_output': ow_output if 'ow_output' in locals() else None,
-            'input_offset_output': offset_output if 'offset_output' in locals() else None,
-            'ubw_output': ubw_output if 'ubw_output' in locals() else None,
-            'pm_output':pm_output if 'pm_output' in locals() else None,
-            'pr_output':pr_output if 'pr_output' in locals() else None,
-            'cmrr_output':cmrr_output if 'cmrr_output' in locals() else None,
-            'icmr_output':icmr_output if 'icmr_output' in locals() else None,
-            'thd_output':thd_output if 'thd_output' in locals() else None}, opti_netlist
+    deps = OptimizationDeps(
+        make_chat_completion_request=make_chat_completion_request,
+        run_ngspice=run_ngspice,
+        filter_lines=filter_lines,
+        convert_to_csv=convert_to_csv,
+        format_csv_to_key_value=format_csv_to_key_value,
+        read_txt_as_string=read_txt_as_string,
+        ac_gain=ac_gain,
+        dc_gain=_missing_dc_gain,
+        out_swing=out_swing,
+        offset=offset,
+        ICMR=ICMR,
+        tran_gain=tran_gain,
+        bandwidth=bandwidth,
+        unity_bandwidth=unity_bandwidth,
+        phase_margin=phase_margin,
+        stat_power=stat_power,
+        thd_input_range=thd_input_range,
+        cmrr_tran=cmrr_tran,
+        extract_code=extract_code,
+    )
+    config = OptimizationConfig()
+    runner = OptimizationRunner(context, deps, config)
+    initial_metrics = {
+        "gain_output": Gain_init,
+        "tr_gain_output": Tran_Gain_init,
+        "output_swing_output": OW_init,
+        "input_offset_output": Offset_init,
+        "icmr_output": ICMR_init,
+        "ubw_output": UBw_init,
+        "pm_output": Pm_init,
+        "pr_output": Power_init,
+        "cmrr_output": CMRR_init,
+        "thd_output": Thd_init,
+    }
+    return runner.run(tools, target_values, sim_netlist, extracting_method, initial_metrics)
 #%%
 def run_multiple_optimizations(target_values, sim_netlist, num_runs=1):
     results = []  # List to store results of each run
