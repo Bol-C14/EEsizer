@@ -18,6 +18,19 @@ from agent_test_gpt.llm_client import (
     make_chat_completion_request,
     make_chat_completion_request_function,
 )
+from agent_test_gpt.toolchain import (
+    extract_tool_data,
+    format_simulation_types,
+    format_simulation_tools,
+    format_analysis_types,
+    combine_results,
+)
+from agent_test_gpt.netlist_utils import (
+    normalize_spice_includes,
+    nodes_extract,
+    extract_code,
+    extract_number,
+)
 #%%
 from dotenv import load_dotenv
 import os
@@ -28,59 +41,6 @@ load_dotenv()
 # Access the API URL and API key
 #api_base_url = os.getenv('API_URL')
 api_key = os.getenv('OPENAI_API_KEY')
-
-
-_INCLUDE_PATTERN = re.compile(r"^\s*\.include\s+['\"]?(?P<path>[^'\"\s]+)['\"]?", re.IGNORECASE | re.MULTILINE)
-
-
-def _resolve_spice_include_path(raw_path: str) -> str | None:
-    """Resolve a relative .include path against known project folders.
-
-    This keeps notebook-derived netlists (e.g. `.include 'ptm_90.txt'`) runnable
-    when executed from the repository root.
-    """
-
-    include_path = Path(raw_path)
-    if include_path.is_absolute():
-        return raw_path if include_path.exists() else None
-
-    cwd = Path.cwd()
-    if (cwd / include_path).exists():
-        return raw_path
-
-    search_roots = (
-        cwd / "agent_test_gpt",
-        cwd / "agent_test_gemini",
-        cwd / "agent_test_claude",
-        cwd / "legacy_notebook" / "agent_test_gpt",
-        cwd / "legacy_notebook" / "agent_test_gemini",
-        cwd / "legacy_notebook" / "agent_test_claude",
-        cwd / "variation",
-    )
-    for root in search_roots:
-        candidate = root / include_path
-        if candidate.exists():
-            try:
-                return str(candidate.relative_to(cwd))
-            except ValueError:
-                return str(candidate)
-    return None
-
-
-def normalize_spice_includes(netlist_text: str) -> str:
-    """Rewrite `.include` lines to point at resolvable files when possible."""
-
-    def _repl(match: re.Match[str]) -> str:
-        raw_path = match.group("path")
-        resolved = _resolve_spice_include_path(raw_path)
-        if not resolved or resolved == raw_path:
-            return match.group(0)
-        return match.group(0).replace(raw_path, resolved, 1)
-
-    return _INCLUDE_PATTERN.sub(_repl, netlist_text)
-
-#print(f"API URL: {api_base_url}")
-#print(f"API Key: {api_key}")
 #%% md
 # ## User Input
 #%%
@@ -218,85 +178,6 @@ print(type_identify_prompt)
 #%%
 type_identified = make_chat_completion_request(type_identify_prompt)
 print(type_identified)
-#%%
-"""
-extracting node names from LLM output
-asked the LLM to
-"""
-
-def nodes_extract(node):
-    try:
-        # Step 1: Clean the input string (remove backticks, "json", and extra whitespace)
-        nodes = node.strip().strip('`')  # Remove leading/trailing backticks and whitespace
-        nodes = nodes.replace("json", "").strip()  # Remove the word "json" and any extra whitespace
-
-        # Step 2: Parse the JSON string into a dictionary
-        node_name = json.loads(nodes)  # Use json.loads() for parsing strings
-
-        # Step 3: Initialize lists to store input nodes, output nodes, and source names
-        input_nodes = []
-        output_nodes = []
-        source_names = []
-
-        # Step 4: Iterate through the "nodes" list (support multiple schema variants)
-        for node_item in node_name.get("nodes", []):
-            if not isinstance(node_item, dict):
-                continue
-
-            # Legacy format: {"input_node": "in1"}, {"source_name": "Vid"}
-            if "input_node" in node_item:
-                input_nodes.append(node_item["input_node"])
-                continue
-            if "output_node" in node_item:
-                output_nodes.append(node_item["output_node"])
-                continue
-            if "source_name" in node_item:
-                source_names.append(node_item["source_name"])
-                continue
-
-            # Newer format: {"input_nodes": [..]}, {"source_names": [..]}
-            if "input_nodes" in node_item and isinstance(node_item["input_nodes"], list):
-                input_nodes.extend([str(x) for x in node_item["input_nodes"]])
-                continue
-            if "source_names" in node_item and isinstance(node_item["source_names"], list):
-                source_names.extend([str(x) for x in node_item["source_names"]])
-                continue
-
-        # Step 5: Return the extracted lists
-        return input_nodes, output_nodes, source_names
-
-    except json.JSONDecodeError as e:
-        print("Error parsing JSON:", e)
-        return [], [], []
-    except KeyError as e:
-        print(f"Missing key in JSON: {e}")
-        return [], [], []
-
-def extract_code(text):
-    regex1 = r"'''(.+?)'''" 
-    regex2 = r"```(.+?)```"
-
-    matches1 = re.findall(regex1, text, re.DOTALL)
-    matches2 = re.findall(regex2, text, re.DOTALL)
-
-    extracted_code = "\n".join(matches1 + matches2)
-    lines = extracted_code.split('\n')
-    cleaned_lines = []
-
-    for line in lines:
-        if '*' in line:
-            line = line.split('*')[0].strip()
-        elif '#' in line:
-            line = line.split('#')[0].strip()
-        elif ';' in line:
-            line = line.split(';')[0].strip()
-        elif line.startswith('verilog'):
-            line = '\n'
-        if line:  
-            cleaned_lines.append(line)
-    
-    cleaned_code = "\n".join(cleaned_lines)
-    return cleaned_code
 
 node_prompt = prompts.build_node_prompt(node_question, netlist)
 #%%
@@ -1220,19 +1101,6 @@ def tool_calling(tool_chain):
     
     return sim_output, sim_netlist
 
-"""
-负责把
-"""
-def extract_number(value):
-    # Convert the value to a string (in case it's an integer or None)
-    value_str = str(value) if value is not None else "0"
-    
-    # Use regex to find all numeric values (including decimals)
-    match = re.search(r"[-+]?\d*\.\d+|\d+", value_str)
-    if match:
-        return float(match.group(0))
-    return None
-#%%
 print(sim_question)
 #%%
 print(sizing_question)
@@ -1242,209 +1110,6 @@ print(sim_prompts_gen)
 #sim_prompts = make_chat_completion_request(sim_prompts_gen)
 #%%
 tool = make_chat_completion_request_function(sizing_question)
-#%%
-def extract_tool_data(tool):
-    """Extract tool call data from all tool calls in the tool object.
-
-    Robust behavior and fallbacks:
-    - Safely parse `function.arguments` whether it's JSON, a concatenated JSON objects string, or a dict.
-    - If `simulation_tool` is missing, fallback to the tool-call function name or a sensible default ('run_ngspice').
-    - Return a list of normalized dicts with keys: simulation_type, analysis_type, simulation_tool, raw_args.
-    """
-    message = tool.choices[0].message
-    tool_data_list = []
-
-    # Helper to normalize a single parsed dict and a tool_call object
-    def _normalize(parsed_obj, tool_call_obj):
-        if not isinstance(parsed_obj, dict):
-            parsed_obj = {}
-        sim_type = parsed_obj.get("simulation_type")
-        analysis = parsed_obj.get("analysis_type")
-        sim_tool = parsed_obj.get("simulation_tool")
-
-        # Fallbacks for simulation_tool
-        if not sim_tool:
-            sim_tool = getattr(tool_call_obj.function, "name", None) \
-                       or getattr(tool_call_obj, "name", None) \
-                       or "run_ngspice"
-
-        # Notebook schema uses a single wrapper tool name; map it to our local runner.
-        if str(sim_tool).lower() == "universal_circuit_tool":
-            sim_tool = "run_ngspice"
-
-        return {
-            "simulation_type": sim_type,
-            "analysis_type": analysis,
-            "simulation_tool": sim_tool,
-            "raw_args": parsed_obj,
-        }
-
-    for tool_call in getattr(message, "tool_calls", []) or []:
-        arguments = getattr(tool_call.function, "arguments", None)
-
-        # If arguments is already a dict-like object
-        if isinstance(arguments, dict):
-            tool_data_list.append(_normalize(arguments, tool_call))
-            continue
-
-        # If arguments is a string, try several parse strategies
-        parsed = None
-        if isinstance(arguments, str):
-            arg_str = arguments.strip()
-            # Attempt JSON parse
-            try:
-                parsed = json.loads(arg_str)
-            except Exception:
-                # Try to coerce concatenated JSON objects into a list: '}{' -> '},{'
-                try:
-                    combined = "[" + arg_str.replace("}{", "},{") + "]"
-                    arr = json.loads(combined)
-                    if isinstance(arr, list):
-                        # normalize each item
-                        for item in arr:
-                            tool_data_list.append(_normalize(item, tool_call))
-                        continue
-                except Exception:
-                    parsed = None
-
-                # As a last resort, try a safe eval (very limited)
-                try:
-                    parsed = eval(arg_str, {"__builtins__": {}}, {})
-                except Exception:
-                    parsed = None
-
-        # If parsed successfully as a dict
-        if isinstance(parsed, dict):
-            tool_data_list.append(_normalize(parsed, tool_call))
-        elif parsed is None:
-            # No usable arguments -> still produce an entry with fallbacks
-            tool_data_list.append(_normalize({}, tool_call))
-
-    return tool_data_list
-
-
-def _infer_simulation_type_from_analysis(analysis_type):
-    """Infer a simulation type from an analysis_type string or list when simulation_type is missing.
-
-    Rules (kept small and conservative):
-    - AC-related analyses => 'ac'
-    - transient analyses => 'transient'
-    - DC-related analyses => 'dc'
-    - If ambiguous or missing, default to 'dc' (safe choice for operating point checks).
-    """
-    if not analysis_type:
-        return None
-    if isinstance(analysis_type, list):
-        candidates = analysis_type
-    else:
-        candidates = [s.strip() for s in str(analysis_type).split(",") if s.strip()]
-
-    ac_keywords = {"ac_gain", "bandwidth", "unity_bandwidth", "phase_margin", "cmrr_tran", "cmrr"}
-    tran_keywords = {"tran_gain", "thd_input_range", "cmrr_tran"}
-    dc_keywords = {"output_swing", "offset", "ICMR", "power"}
-
-    for c in candidates:
-        if c in ac_keywords:
-            return "ac"
-    for c in candidates:
-        if c in tran_keywords:
-            return "transient"
-    for c in candidates:
-        if c in dc_keywords:
-            return "dc"
-
-    # default fallback
-    return None
-
-
-def format_simulation_types(tool_data_list):
-    """Format unique simulation types with robust fallbacks.
-
-    If `simulation_type` is missing, try to infer it from `analysis_type`. If still missing, default to 'dc'.
-    Returns a list of dicts like: {"name": "ac_simulation"}.
-    """
-    unique_sim_types = set()
-    formatted_output = []
-    for tool_data in tool_data_list:
-        sim_type = tool_data.get("simulation_type")
-        if not sim_type:
-            sim_type = _infer_simulation_type_from_analysis(tool_data.get("analysis_type"))
-        if not sim_type:
-            sim_type = "dc"  # safe default
-
-        sim_name = f"{sim_type}_simulation"
-        if sim_name not in unique_sim_types:
-            unique_sim_types.add(sim_name)
-            formatted_output.append({"name": sim_name})
-    return formatted_output
-
-
-def format_simulation_tools(tool_data_list):
-    """Format unique simulation tools. Use fallbacks when fields are missing.
-
-    Returns a list of dicts like: {"name": "run_ngspice"}.
-    """
-    unique_sim_tools = set()
-    formatted_output = []
-    for tool_data in tool_data_list:
-        sim_tool = tool_data.get("simulation_tool") or tool_data.get("raw_args", {}).get("simulation_tool")
-        if not sim_tool:
-            # fallback to any sensible metadata contained in raw_args or default
-            sim_tool = tool_data.get("raw_args", {}).get("tool") or tool_data.get("raw_args", {}).get("tool_name")
-        if not sim_tool:
-            sim_tool = "run_ngspice"
-
-        if sim_tool not in unique_sim_tools:
-            unique_sim_tools.add(sim_tool)
-            formatted_output.append({"name": sim_tool})
-    return formatted_output
-
-
-def format_analysis_types(tool_data_list):
-    """Format all analysis types from all tool calls, with cmrr_tran and thd_input_range appended last.
-
-    This function tolerates missing keys and accepts analysis_type as string or list.
-    """
-    formatted_output = []
-    cmrr_thd_items = []
-
-    for tool_data in tool_data_list:
-        analysis_type = tool_data.get("analysis_type")
-        if not analysis_type:
-            # Nothing explicit — try to infer a reasonable analysis from simulation_type
-            sim_type = tool_data.get("simulation_type") or _infer_simulation_type_from_analysis(tool_data.get("analysis_type"))
-            if sim_type == "ac":
-                # default ac analyses when nothing provided
-                formatted_output.append({"name": "ac_gain"})
-                continue
-            elif sim_type == "transient":
-                formatted_output.append({"name": "tran_gain"})
-                continue
-            else:
-                # default dc analysis
-                formatted_output.append({"name": "output_swing"})
-                continue
-
-        # If analysis_type exists, normalize it
-        if isinstance(analysis_type, str):
-            analyses = [a.strip() for a in analysis_type.split(",") if a.strip()]
-        elif isinstance(analysis_type, list):
-            analyses = analysis_type
-        else:
-            analyses = [str(analysis_type)]
-
-        for analysis in analyses:
-            if analysis in ["cmrr_tran", "thd_input_range"]:
-                cmrr_thd_items.append({"name": analysis})
-            else:
-                formatted_output.append({"name": analysis})
-
-    # Append cmrr and thd items at the end
-    formatted_output.extend(cmrr_thd_items)
-    return formatted_output
-def combine_results(sim_types, sim_tools, analysis_types):
-    """Combine simulation types, tools, and analysis types into one list."""
-    return sim_types + sim_tools + analysis_types
 
 # Example usage
 # tool = ...  # Your tool object
