@@ -12,6 +12,7 @@ import numpy as np
 
 from agent_test_gpt import prompts
 from agent_test_gpt import config
+from agent_test_gpt.simulation_utils import _ensure_flat_str_list
 
 
 @dataclass
@@ -95,15 +96,18 @@ class ToolChainRunner:
         cmrr_max = None
         sim_netlist = self.context.netlist
 
+        source_names = _ensure_flat_str_list("context.source_names", self.context.source_names)
+        output_nodes = _ensure_flat_str_list("context.output_nodes", self.context.output_nodes)
+
         for tool_call in tool_chain["tool_calls"]:
             tool_name = tool_call["name"].lower()
             if tool_name == "dc_simulation":
-                sim_netlist = self.deps.dc_simulation(sim_netlist, self.context.source_names, self.context.output_nodes)
+                sim_netlist = self.deps.dc_simulation(sim_netlist, source_names, output_nodes)
             elif tool_name == "ac_simulation":
-                sim_netlist = self.deps.ac_simulation(sim_netlist, self.context.source_names, self.context.output_nodes)
+                sim_netlist = self.deps.ac_simulation(sim_netlist, source_names, output_nodes)
                 print(f"ac_netlist:{sim_netlist}")
             elif tool_name == "transient_simulation":
-                sim_netlist = self.deps.trans_simulation(sim_netlist, self.context.source_names, self.context.output_nodes)
+                sim_netlist = self.deps.trans_simulation(sim_netlist, source_names, output_nodes)
             elif tool_name == "run_ngspice":
                 vgscheck = self._run_ngspice_with_vgscheck(sim_netlist)
             elif tool_name == "ac_gain":
