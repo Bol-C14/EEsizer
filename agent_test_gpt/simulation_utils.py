@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
@@ -14,47 +15,69 @@ from scipy.signal import find_peaks
 from agent_test_gpt.netlist_utils import normalize_spice_includes
 
 
+def _ensure_flat_str_list(name, xs):
+    """Validate a list of node names is flat and coercible to strings."""
+
+    if isinstance(xs, str):
+        return [xs]
+
+    if not isinstance(xs, Sequence):
+        raise TypeError(f"{name} must be a list of strings, got {type(xs).__name__}: {xs!r}")
+
+    flat = []
+    for x in xs:
+        if isinstance(x, (list, tuple, dict, set)):
+            raise TypeError(
+                f"{name} must be a *flat* list of strings, "
+                f"but got nested element of type {type(x).__name__}: {xs!r}"
+            )
+        flat.append(str(x))
+
+    return flat
+
+
 def dc_simulation(netlist, input_name, output_node):
-     end_index = netlist.index('.end\n')
+    end_index = netlist.index('.end\n')
 
-     #input_nodes_str = ' '.join(input_name)
-     output_nodes_str = ' '.join(output_node)
+    output_node = _ensure_flat_str_list("output_nodes", output_node)
+    output_nodes_str = ' '.join(output_node)
 
-     simulation_commands = f'''
-    
-    .control
-      dc Vcm 0 1.2 0.001        
-      wrdata output/output_dc.dat {output_nodes_str}  
-    .endc
-     '''
-     new_netlist = netlist[:end_index] + simulation_commands + netlist[end_index:]
-     print(f"dc netlist:{new_netlist}")
-     return new_netlist
+    simulation_commands = f'''
+        .control
+          dc Vcm 0 1.2 0.001
+          wrdata output/output_dc.dat {output_nodes_str}
+        .endc
+         '''
+    new_netlist = netlist[:end_index] + simulation_commands + netlist[end_index:]
+    print(f"dc netlist:{new_netlist}")
+    return new_netlist
 
 
 def ac_simulation(netlist, input_name, output_node):
-     end_index = netlist.index('.end\n')
+    end_index = netlist.index('.end\n')
 
-     output_nodes_str = ' '.join(output_node)
-     simulation_commands = f'''
-      .control
-        ac dec 10 1 10G        
-        wrdata output/output_ac.dat {output_nodes_str} 
-      .endc
-     '''
-     new_netlist = netlist[:end_index] + simulation_commands + netlist[end_index:]
-     return new_netlist
+    output_node = _ensure_flat_str_list("output_nodes", output_node)
+    output_nodes_str = ' '.join(output_node)
+    simulation_commands = f'''
+        .control
+          ac dec 10 1 10G
+          wrdata output/output_ac.dat {output_nodes_str}
+        .endc
+         '''
+    new_netlist = netlist[:end_index] + simulation_commands + netlist[end_index:]
+    return new_netlist
 
 
 def trans_simulation(netlist, input_name, output_node):
     end_index = netlist.index('.end\n')
+    output_node = _ensure_flat_str_list("output_nodes", output_node)
     output_nodes_str = ' '.join(output_node)
     simulation_commands = f'''
-      .control
-        tran 50n 500u
-        wrdata output/output_tran.dat {output_nodes_str} I(vdd) in1
-      .endc
-     '''
+        .control
+          tran 50n 500u
+          wrdata output/output_tran.dat {output_nodes_str} I(vdd) in1
+        .endc
+         '''
     new_netlist = netlist[:end_index] + simulation_commands + netlist[end_index:]
     return new_netlist
 
