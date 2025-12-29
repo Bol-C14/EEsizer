@@ -11,6 +11,7 @@ import time
 import numpy as np
 
 from agent_test_gpt import prompts
+from agent_test_gpt import config
 
 
 @dataclass
@@ -22,10 +23,10 @@ class ToolCallingContext:
 
 @dataclass
 class ToolCallingConfig:
-    input_txt: str = "output/op.txt"
-    filtered_txt: str = "output/vgscheck.txt"
-    output_csv: str = "output/vgscheck.csv"
-    output_txt: str = "output/vgscheck_output.txt"
+    input_txt: str = config.OP_TXT_PATH
+    filtered_txt: str = config.VGS_FILTERED_PATH
+    output_csv: str = config.VGS_CSV_PATH
+    output_txt: str = config.VGS_OUTPUT_PATH
 
 
 @dataclass
@@ -187,15 +188,15 @@ class OptimizationContext:
 
 @dataclass
 class OptimizationConfig:
-    max_iterations: int = 25
-    tolerance: float = 0.05
-    output_dir: str = "output/90nm"
-    history_file: str = "output/90nm/result_history.txt"
-    csv_file: str = "output/90nm/g2_o3.csv"
-    input_txt: str = "output/op.txt"
-    filtered_txt: str = "output/vgscheck.txt"
-    output_csv: str = "output/vgscheck.csv"
-    output_txt: str = "output/vgscheck_output.txt"
+    max_iterations: int = config.MAX_ITERATIONS
+    tolerance: float = config.TOLERANCE
+    output_dir: str = config.OUTPUT_DIR
+    history_file: str = config.RESULT_HISTORY_FILE
+    csv_file: str = config.CSV_FILE
+    input_txt: str = config.OP_TXT_PATH
+    filtered_txt: str = config.VGS_FILTERED_PATH
+    output_csv: str = config.VGS_CSV_PATH
+    output_txt: str = config.VGS_OUTPUT_PATH
 
 
 @dataclass
