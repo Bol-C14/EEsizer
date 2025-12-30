@@ -2,6 +2,10 @@
 
 from openai import OpenAI
 
+from agent_test_gpt.logging_utils import get_logger
+
+_logger = get_logger(__name__)
+
 
 """
 All LLM calls go through this provider wrapper.
@@ -29,7 +33,7 @@ def make_chat_completion_request(prompt):
     # openai.default_project = "YOUR_PROJECT_ID"
 
     # Step 3: Call the Chat Completions API with streaming enabled
-    print("Making ChatCompletion request with streaming enabled...")
+    _logger.info("Making ChatCompletion request with streaming enabled...")
     try:
         response = client.chat.completions.create(
             # model="anthropic.claude-3-haiku-20240307-v1:0",
@@ -45,16 +49,16 @@ def make_chat_completion_request(prompt):
             max_completion_tokens=20000,
         )
     except Exception as e:
-        print("Error making API call:", e)
-        return
+        _logger.error("Error making API call: %s", e, exc_info=True)
+        raise
 
     generated_content = " "
-    print("Streaming response:")
+    _logger.debug("Streaming response:")
     for chunk in response:
         # Each 'chunk' is a dict similar to what the OpenAI API returns.
         if chunk.choices[0].delta.content is not None:
             content = chunk.choices[0].delta.content
-            print(content, end="")
+            _logger.debug(content)
             generated_content += content
 
     return generated_content
@@ -84,7 +88,7 @@ def make_chat_completion_request_function(prompt):
     # openai.default_project = "YOUR_PROJECT_ID"
 
     # Step 3: Call the Chat Completions API with streaming enabled
-    print("Making ChatCompletion request with function calling enabled...")
+    _logger.info("Making ChatCompletion request with function calling enabled...")
     tools = [
         {
             "type": "function",
@@ -135,11 +139,10 @@ def make_chat_completion_request_function(prompt):
             tool_choice="required"
         )
     except Exception as e:
-        print("Error making API call:", e)
-        return
+        _logger.error("Error making API call: %s", e, exc_info=True)
+        raise
 
     # Step 4: Print the complete JSON response.
-    print("Non-streaming response:")
-    print(response)
+    _logger.debug("Non-streaming response: %s", response)
 
     return response

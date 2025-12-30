@@ -13,17 +13,14 @@ def run_multiple_optimizations(target_values, sim_netlist, tool_chain, extract_n
     results = []
 
     for i in range(num_runs):
-        print(f"Starting optimization run {i + 1}")
         result, _opti_netlist = optimization(tool_chain, target_values, sim_netlist, extract_number)
         results.append(result)
-        print(f"Run {i + 1} result: {result}")
-        print("----------------------\n")
     return results
 
 
-def copy_netlist(source_file, destination_file=config.NETLIST_OUTPUT_PATH):
+def copy_netlist(source_file: str, destination_file: str):
+    """Copy a netlist to a caller-defined destination; no shared defaults to avoid collisions."""
     shutil.copyfile(source_file, destination_file)
-    print(f"Netlist copy to {destination_file}")
 
 
 def plot_subplot(ax, df, colors, x, y, xlabel, ylabel, ylim_min, ylim_max, fill_range=None, fill_label=None, log_scale=False):
@@ -49,7 +46,7 @@ def plot_subplot(ax, df, colors, x, y, xlabel, ylabel, ylim_min, ylim_max, fill_
         ax.set_yscale("log")
 
 
-def plot_optimization_history(csv_path=config.CSV_FILE, output_pdf=config.PLOT_PDF_PATH, max_batches=5):
+def plot_optimization_history(csv_path: str, output_pdf: str, max_batches=5):
     df = pd.read_csv(csv_path)
     df["batch"] = (df["iteration"] == 0).cumsum()
     df["bw_output_dB"] = 20 * np.log10(df["ubw_output"] + 1e-9)

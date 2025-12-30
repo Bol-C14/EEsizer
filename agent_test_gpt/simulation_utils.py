@@ -15,6 +15,9 @@ from scipy.signal import find_peaks
 
 from agent_test_gpt import config
 from agent_test_gpt.netlist_utils import normalize_spice_includes
+from agent_test_gpt.logging_utils import get_logger
+
+_logger = get_logger(__name__)
 
 
 def _ensure_flat_str_list(name, xs):
@@ -39,6 +42,8 @@ def _ensure_flat_str_list(name, xs):
 
 
 def _out_path(output_dir: str, filename: str) -> str:
+    if not output_dir:
+        raise ValueError("output_dir must be provided for simulation outputs")
     return str(Path(output_dir) / filename)
 
 
@@ -51,7 +56,7 @@ def _find_end_index(netlist: str) -> int:
     return match.start()
 
 
-def dc_simulation(netlist, input_name, output_node, output_dir: str = config.RUN_OUTPUT_ROOT):
+def dc_simulation(netlist, input_name, output_node, output_dir: str):
     end_index = _find_end_index(netlist)
 
     output_node = _ensure_flat_str_list("output_nodes", output_node)
@@ -64,11 +69,11 @@ def dc_simulation(netlist, input_name, output_node, output_dir: str = config.RUN
         .endc
          '''
     new_netlist = netlist[:end_index] + simulation_commands + netlist[end_index:]
-    print(f"dc netlist:{new_netlist}")
+    _logger.debug("dc netlist:%s", new_netlist)
     return new_netlist
 
 
-def ac_simulation(netlist, input_name, output_node, output_dir: str = config.RUN_OUTPUT_ROOT):
+def ac_simulation(netlist, input_name, output_node, output_dir: str):
     end_index = _find_end_index(netlist)
 
     output_node = _ensure_flat_str_list("output_nodes", output_node)
@@ -83,7 +88,7 @@ def ac_simulation(netlist, input_name, output_node, output_dir: str = config.RUN
     return new_netlist
 
 
-def trans_simulation(netlist, input_name, output_node, output_dir: str = config.RUN_OUTPUT_ROOT):
+def trans_simulation(netlist, input_name, output_node, output_dir: str):
     end_index = _find_end_index(netlist)
     output_node = _ensure_flat_str_list("output_nodes", output_node)
     output_nodes_str = ' '.join(output_node)
@@ -97,7 +102,7 @@ def trans_simulation(netlist, input_name, output_node, output_dir: str = config.
     return new_netlist
 
 
-def tran_inrange(netlist, output_dir: str = config.RUN_OUTPUT_ROOT):
+def tran_inrange(netlist, output_dir: str):
     modified_netlist = re.sub(r'\.control.*?\.endc', '', netlist, flags=re.DOTALL)
     netlist_set = ""
     for line in modified_netlist.splitlines():
@@ -131,7 +136,7 @@ def tran_inrange(netlist, output_dir: str = config.RUN_OUTPUT_ROOT):
     return new_netlist
 
 
-def out_swing(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
+def out_swing(filename, output_dir: str):
     #vdd=1.2
     netlist_path = _out_path(output_dir, "netlist.cir")
     with open(netlist_path, 'r') as f:
@@ -157,7 +162,7 @@ def out_swing(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
     '''
     end_index = _find_end_index(updated_netlist)
     netlist_ow = updated_netlist[:end_index] + simulation_commands + updated_netlist[end_index:]
-    print(netlist_ow)
+    _logger.debug(netlist_ow)
     with open(_out_path(output_dir, 'netlist_ow.cir'), 'w') as f:
         f.write(netlist_ow)
     run_ngspice(netlist_ow,'netlist_ow', output_dir=output_dir )
@@ -169,7 +174,7 @@ def out_swing(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
     # Replace zero or near-zero values with a small epsilon to avoid log10(0) error
     epsilon = 1e-10
     d_output_d_in1 = np.where(np.abs(d_output_d_in1) < epsilon, epsilon, np.abs(d_output_d_in1))
-    print(d_output_d_in1)
+    _logger.debug("d_output_d_in1: %s", d_output_d_in1)
 
     # Compute gain safely
     #gain = 20 * np.log10(np.abs(d_output_d_in1))
@@ -187,12 +192,12 @@ def out_swing(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
         #print(f"Difference: {vout_diff}")
     else:
         ow = 0
-        print("No values found where gain >= 0.9*grad")
-    print(f'output swing: {ow}')
+        _logger.warning("No values found where gain >= 0.9*grad")
+    _logger.info("output swing: %s", ow)
     return ow
 
 
-def offset(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
+def offset(filename, output_dir: str):
     vdd=1.2
     netlist_path = _out_path(output_dir, "netlist.cir")
     with open(netlist_path, 'r') as f:
@@ -243,12 +248,12 @@ def offset(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
     else:
         voff = float(voff)  # Convert to float if it's already a single value
 
-    print(voff)
+    _logger.info("offset: %s", voff)
 
     return voff
 
 
-def ICMR(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
+def ICMR(filename, output_dir: str):
     netlist_path = _out_path(output_dir, "netlist.cir")
     with open(netlist_path, "r") as f:
         netlist_content = f.read()
@@ -301,16 +306,16 @@ def ICMR(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
         icmr_out = ic_max - ic_min
     elif len(unit_gain_indices) == 1:
         icmr_out = 0
-        print("Warning: Only one unit gain point found")
+        _logger.warning("Only one unit gain point found")
     else:
-        print("Warning:no unit gain point found")
+        _logger.warning("No unit gain point found")
         icmr_out = 0
 
-    print(icmr_out)
+    _logger.info("icmr: %s", icmr_out)
     return icmr_out
 
 
-def tran_gain(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
+def tran_gain(file_name, output_dir: str):
     data_tran = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
     num_columns = data_tran.shape[1]
 
@@ -330,12 +335,12 @@ def tran_gain(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
     else:
         raise ValueError("The input file must have 2 columns.")
 
-    print(f"tran gain = {tran_gain}")
+    _logger.info("tran gain = %s", tran_gain)
 
     return tran_gain
 
 
-def ac_gain(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
+def ac_gain(file_name, output_dir: str):
     data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
     num_columns = data_ac.shape[1]
 
@@ -351,12 +356,12 @@ def ac_gain(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
     else:
         raise ValueError("The input file must have either 3 or 6 columns.")
 
-    print(f"gain = {gain}")
+    _logger.info("gain = %s", gain)
 
     return gain
 
 
-def bandwidth(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
+def bandwidth(file_name, output_dir: str):
     data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
     num_columns = data_ac.shape[1]
     frequency = data_ac[:, 0]
@@ -383,12 +388,12 @@ def bandwidth(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
     else:
         f_l = f_h = bandwidth = 0
 
-    print(f"bandwidth = {bandwidth}")
+    _logger.info("bandwidth = %s", bandwidth)
 
     return bandwidth
 
 
-def unity_bandwidth(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
+def unity_bandwidth(file_name, output_dir: str):
     data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
     num_columns = data_ac.shape[1]
     frequency = data_ac[:, 0]
@@ -415,12 +420,12 @@ def unity_bandwidth(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
     else:
         f_l = f_h = bandwidth = 0
 
-    print(f"unity bandwidth = {bandwidth}")
+    _logger.info("unity bandwidth = %s", bandwidth)
 
     return bandwidth
 
 
-def phase_margin(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
+def phase_margin(file_name, output_dir: str):
     data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
     num_columns = data_ac.shape[1]
     frequency = data_ac[:,0]
@@ -480,12 +485,12 @@ def stat_power(filename, vdd=1.8, output_dir: str = config.RUN_OUTPUT_ROOT):
         Ileak = calculate_static_current(iout)
         static_power = np.abs(Ileak * vdd)
 
-    print(f"power = {static_power}")
+    _logger.info("power = %s", static_power)
 
     return static_power
 
 
-def cmrr_tran(netlist, output_dir: str = config.RUN_OUTPUT_ROOT):
+def cmrr_tran(netlist, output_dir: str):
     with open(_out_path(output_dir, "netlist.cir"), 'r') as f:
         netlist_content = f.read()
 
@@ -525,7 +530,7 @@ def cmrr_tran(netlist, output_dir: str = config.RUN_OUTPUT_ROOT):
     '''
     end_index = _find_end_index(updated_netlist)
     netlist_cmrr = updated_netlist[:end_index] + simulation_commands + updated_netlist[end_index:]
-    print(netlist_cmrr)
+    _logger.debug(netlist_cmrr)
     with open(_out_path(output_dir, 'netlist_cmrr.cir'), 'w') as f:
         f.write(netlist_cmrr)
     run_ngspice(netlist_cmrr,'netlist_cmrr', output_dir=output_dir )
@@ -551,7 +556,7 @@ def cmrr_tran(netlist, output_dir: str = config.RUN_OUTPUT_ROOT):
     return cmrr_ac,cmrr_ac_max
 
 
-def thd_input_range(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
+def thd_input_range(filename, output_dir: str):
     thd_values = []
     valid_inputs = []
     threshold_thd = -24.7
@@ -620,8 +625,8 @@ def thd_input_range(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
             valid_inputs.append(np.max(group['col_7']))
 
     thd = np.max(thd_values)
-    print(thd)
-    print(valid_inputs)
+    _logger.info("thd: %s", thd)
+    _logger.debug("valid_inputs: %s", valid_inputs)
 
     if not valid_inputs:  # Check if valid_inputs is empty
         input_ranges = [(0, 0)]  # Return default range if no valid inputs
@@ -639,7 +644,7 @@ def thd_input_range(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
         # Add the last range
         input_ranges.append((start, valid_inputs[-1]))
 
-    print(input_ranges)
+    _logger.debug("input_ranges: %s", input_ranges)
 
     return thd, input_ranges
 
@@ -777,7 +782,7 @@ def read_txt_as_string(file_path):
         return None
 
 
-def run_ngspice(circuit, filename, output_dir: str = config.RUN_OUTPUT_ROOT, timeout_s: int = 120):
+def run_ngspice(circuit, filename, output_dir: str, timeout_s: int = 120):
     output_path = Path(output_dir)
     output_file = output_path / 'op.txt'
     cir_path = output_path / f'{filename}.cir'
@@ -818,7 +823,7 @@ def run_ngspice(circuit, filename, output_dir: str = config.RUN_OUTPUT_ROOT, tim
     # If ngspice is still not found, don't raise - write a clear placeholder and return False
     if not ngspice_path:
         msg = 'NGSPICE_NOT_FOUND: set NGSPICE_PATH or install ngspice (or place binary in conda env bin)'
-        print(msg)
+        _logger.error(msg)
         with open(output_file, 'w') as f:
             f.write(msg + "\n")
         return False
@@ -834,23 +839,23 @@ def run_ngspice(circuit, filename, output_dir: str = config.RUN_OUTPUT_ROOT, tim
         with open(output_file, "w") as f:
             f.write(ngspice_output)
         if result.returncode != 0:
-            print(f"NGspice failed with return code {result.returncode}")
+            _logger.error("NGspice failed with return code %s", result.returncode)
             return False
         if "Could not find include file" in ngspice_output:
-            print("NGspice include resolution failed; see op.txt")
+            _logger.error("NGspice include resolution failed; see op.txt")
             return False
     except subprocess.TimeoutExpired as e:
         msg = f"NGSPICE_TIMEOUT after {timeout_s}s: {e}"
         with open(output_file, "w") as f:
             f.write(msg)
-        print(msg)
+        _logger.error(msg)
         return False
     except Exception as e:
         ngspice_output = f"Error running NGspice: {str(e)}"
         with open(output_file, "w") as f:
             f.write(ngspice_output)
-        print(ngspice_output)
+        _logger.error(ngspice_output, exc_info=True)
         return False
 
-    print("NGspice output written to", output_file)
+    _logger.info("NGspice output written to %s", output_file)
     return True
