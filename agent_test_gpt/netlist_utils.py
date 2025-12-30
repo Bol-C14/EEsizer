@@ -4,6 +4,8 @@ import json
 import re
 from pathlib import Path
 
+from agent_test_gpt import config
+
 
 _INCLUDE_PATTERN = re.compile(r"^\s*\.include\s+['\"]?(?P<path>[^'\"\s]+)['\"]?", re.IGNORECASE | re.MULTILINE)
 _CONTROL_BLOCK_PATTERN = re.compile(r"\.control.*?\.endc", re.IGNORECASE | re.DOTALL)
@@ -25,6 +27,7 @@ def _resolve_spice_include_path(raw_path: str) -> str | None:
         return raw_path
 
     search_roots = (
+        config.RESOURCE_DIR,
         cwd / "agent_test_gpt",
         cwd / "agent_test_gemini",
         cwd / "agent_test_claude",

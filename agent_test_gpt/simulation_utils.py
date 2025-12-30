@@ -47,6 +47,13 @@ def _out_path(output_dir: str, filename: str) -> str:
     return str(Path(output_dir) / filename)
 
 
+def _require_file(path: str):
+    p = Path(path)
+    if not p.exists() or p.stat().st_size == 0:
+        raise RuntimeError(f"Required simulation data missing or empty: {path}")
+    return path
+
+
 def _find_end_index(netlist: str) -> int:
     """Locate the `.end` card regardless of trailing newline/case; raise if missing."""
 
@@ -166,7 +173,8 @@ def out_swing(filename, output_dir: str):
     with open(_out_path(output_dir, 'netlist_ow.cir'), 'w') as f:
         f.write(netlist_ow)
     run_ngspice(netlist_ow,'netlist_ow', output_dir=output_dir )
-    data_dc = np.genfromtxt(_out_path(output_dir, f'{filename}_ow.dat'), skip_header=1)
+    data_path = _require_file(_out_path(output_dir, f'{filename}_ow.dat'))
+    data_dc = np.genfromtxt(data_path, skip_header=1)
     output = data_dc[0:,1]
     in1 = data_dc[0:,3]
     d_output_d_in1 = np.gradient(output, in1)
@@ -232,9 +240,12 @@ def offset(filename, output_dir: str):
     with open(_out_path(output_dir, 'netlist_offset.cir'), 'w') as f:
         f.write(netlist_offset)
     run_ngspice(netlist_offset,'netlist_offset', output_dir=output_dir )
-    data_dc = np.genfromtxt(_out_path(output_dir, f'{filename}_offset.dat'), skip_header=1)
+    data_path = _require_file(_out_path(output_dir, f'{filename}_offset.dat'))
+    data_dc = np.genfromtxt(data_path, skip_header=1)
 
     # Extract input and output values from the data
+    if data_dc.shape[0] < 40:
+        raise RuntimeError("Not enough data points to compute offset.")
     input = data_dc[19:-19, 0]   # Skip first and last points
     output = data_dc[19:-19, 1]
     #print(input)
@@ -246,7 +257,7 @@ def offset(filename, output_dir: str):
     if isinstance(output_offset, np.ndarray) and output_offset.size > 0:
         voff = np.abs(output_offset[0] -0.6)  # Take the first element if it's an array
     else:
-        voff = float(voff)  # Convert to float if it's already a single value
+        raise RuntimeError("Offset calculation failed: missing data at expected bias point.")
 
     _logger.info("offset: %s", voff)
 
@@ -281,7 +292,8 @@ def ICMR(filename, output_dir: str):
 
     run_ngspice(netlist_icmr, "netlist_icmr", output_dir=output_dir)
 
-    data_dc = np.genfromtxt(_out_path(output_dir, f"{filename}_icmr.dat"), skip_header=1)
+    data_path = _require_file(_out_path(output_dir, f"{filename}_icmr.dat"))
+    data_dc = np.genfromtxt(data_path, skip_header=1)
 
     input_vals = data_dc[:, 0]
     output_vals = data_dc[:, 1]
@@ -316,7 +328,8 @@ def ICMR(filename, output_dir: str):
 
 
 def tran_gain(file_name, output_dir: str):
-    data_tran = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
+    data_path = _require_file(_out_path(output_dir, f'{file_name}.dat'))
+    data_tran = np.genfromtxt(data_path, skip_header=1)
     num_columns = data_tran.shape[1]
 
     # for one output node
@@ -341,7 +354,8 @@ def tran_gain(file_name, output_dir: str):
 
 
 def ac_gain(file_name, output_dir: str):
-    data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
+    data_path = _require_file(_out_path(output_dir, f'{file_name}.dat'))
+    data_ac = np.genfromtxt(data_path, skip_header=1)
     num_columns = data_ac.shape[1]
 
     # for one output node
@@ -362,7 +376,8 @@ def ac_gain(file_name, output_dir: str):
 
 
 def bandwidth(file_name, output_dir: str):
-    data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
+    data_path = _require_file(_out_path(output_dir, f'{file_name}.dat'))
+    data_ac = np.genfromtxt(data_path, skip_header=1)
     num_columns = data_ac.shape[1]
     frequency = data_ac[:, 0]
 
@@ -394,7 +409,8 @@ def bandwidth(file_name, output_dir: str):
 
 
 def unity_bandwidth(file_name, output_dir: str):
-    data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
+    data_path = _require_file(_out_path(output_dir, f'{file_name}.dat'))
+    data_ac = np.genfromtxt(data_path, skip_header=1)
     num_columns = data_ac.shape[1]
     frequency = data_ac[:, 0]
 
@@ -426,7 +442,8 @@ def unity_bandwidth(file_name, output_dir: str):
 
 
 def phase_margin(file_name, output_dir: str):
-    data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
+    data_path = _require_file(_out_path(output_dir, f'{file_name}.dat'))
+    data_ac = np.genfromtxt(data_path, skip_header=1)
     num_columns = data_ac.shape[1]
     frequency = data_ac[:,0]
     # for one output node
@@ -472,8 +489,8 @@ def calculate_static_current(simulation_data):
 
 
 def stat_power(filename, vdd=1.8, output_dir: str = config.RUN_OUTPUT_ROOT):
-
-    data_trans = np.genfromtxt(_out_path(output_dir, f'{filename}.dat'))
+    data_path = _require_file(_out_path(output_dir, f'{filename}.dat'))
+    data_trans = np.genfromtxt(data_path)
     num_columns = data_trans.shape[1]
     if num_columns == 3:
         iout = data_trans[:, 3]
@@ -534,7 +551,8 @@ def cmrr_tran(netlist, output_dir: str):
     with open(_out_path(output_dir, 'netlist_cmrr.cir'), 'w') as f:
         f.write(netlist_cmrr)
     run_ngspice(netlist_cmrr,'netlist_cmrr', output_dir=output_dir )
-    data_ac = np.genfromtxt(_out_path(output_dir, 'output_inrange_cmrr.dat'))
+    data_path = _require_file(_out_path(output_dir, 'output_inrange_cmrr.dat'))
+    data_ac = np.genfromtxt(data_path)
     freq = data_ac[:, 0]
     output = data_ac[:, 1] + 1j * data_ac[:, 2]
     # Find indices where freq = 10 GHz (end of a block)
@@ -569,7 +587,8 @@ def thd_input_range(filename, output_dir: str):
     run_ngspice(netlist_inrange, 'netlist_inrange', output_dir=output_dir)
 
     #data preperation
-    data_tran = np.genfromtxt(_out_path(output_dir, f'{filename}_inrange.dat'))
+    data_path = _require_file(_out_path(output_dir, f'{filename}_inrange.dat'))
+    data_tran = np.genfromtxt(data_path)
     time = data_tran[:,0]
     other_data = data_tran[:, 1:]  # Extract other columns
     iteration_indices = np.where(time == 0)[0]

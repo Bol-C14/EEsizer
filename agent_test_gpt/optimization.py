@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple
 from pathlib import Path
+import logging
 import time
 
 import csv
@@ -284,6 +285,7 @@ def parse_target_values(target_values: str, extracting_method: Callable) -> Targ
             merged[key] = value
 
     gain_target = extracting_method(merged.get("ac_gain_target", "0")) if "ac_gain_target" in merged else None
+    dc_gain_target = extracting_method(merged.get("dc_gain_target", "0")) if "dc_gain_target" in merged else None
     bandwidth_target = extracting_method(merged.get("bandwidth_target", "0")) if "bandwidth_target" in merged else None
     unity_bandwidth_target = extracting_method(merged.get("unity_bandwidth_target", "0")) if "unity_bandwidth_target" in merged else None
     phase_margin_target = extracting_method(merged.get("phase_margin_target", "0")) if "phase_margin_target" in merged else None
@@ -292,12 +294,12 @@ def parse_target_values(target_values: str, extracting_method: Callable) -> Targ
     output_swing_target = extracting_method(merged.get("output_swing_target", "0")) if "output_swing_target" in merged else None
     pr_target = extracting_method(merged.get("power_target", "0")) if "power_target" in merged else None
     cmrr_target = extracting_method(merged.get("cmrr_target", "0")) if "cmrr_target" in merged else None
-    thd_raw = extracting_method(merged.get("thd_target", "0")) if "thd_target" in merged else None
-    thd_target = -np.abs(thd_raw) if thd_raw is not None else None
+    thd_target = extracting_method(merged.get("thd_target", "0")) if "thd_target" in merged else None
     icmr_target = extracting_method(merged.get("input_common_mode_range_target", "0")) if "input_common_mode_range_target" in merged else None
 
     targets = {
         "gain_target": gain_target,
+        "dc_gain_target": dc_gain_target,
         "bandwidth_target": bandwidth_target,
         "unity_bandwidth_target": unity_bandwidth_target,
         "phase_margin_target": phase_margin_target,
@@ -312,7 +314,7 @@ def parse_target_values(target_values: str, extracting_method: Callable) -> Targ
     passes = {
         "gain_pass": gain_target is None,
         "tr_gain_pass": tr_gain_target is None,
-        "dc_gain_pass": tr_gain_target is None,
+        "dc_gain_pass": dc_gain_target is None,
         "ow_pass": output_swing_target is None,
         "bw_pass": bandwidth_target is None,
         "ubw_pass": unity_bandwidth_target is None,
@@ -336,6 +338,7 @@ class OptimizationRunner:
         self.context = context
         self.deps = deps
         self.config = config or OptimizationConfig()
+        self.logger = logging.getLogger(__name__)
 
     def _initialize_history(self, sim_netlist: str) -> List[str]:
         os.makedirs(self.config.output_dir, exist_ok=True)
