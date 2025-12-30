@@ -201,6 +201,10 @@ def run_agent(user_question: str, user_netlist: str, run_dir: str | None = None)
     nodes_raw = make_chat_completion_request(node_prompt)
     _logger.info("Nodes response: %s", nodes_raw)
     input_nodes, output_nodes, source_names = nodes_extract(nodes_raw)
+    if not output_nodes:
+        raise ValueError("Node extraction returned no output_nodes; aborting run.")
+    if not source_names:
+        raise ValueError("Node extraction returned no source_names; aborting run.")
     _logger.info("input_nodes:%s output_nodes:%s source_names:%s", input_nodes, output_nodes, source_names)
 
     # Simulation tool chain from LLM

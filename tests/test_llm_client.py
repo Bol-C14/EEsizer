@@ -52,9 +52,9 @@ class TestLLMClientStreaming(unittest.TestCase):
 
         self.assertEqual(result, " HelloWorld")
         call = FakeOpenAI.last_instance.chat.completions.calls[0]
-        self.assertEqual(call["model"], "o3-2025-04-16")
+        self.assertEqual(call["model"], llm_client.DEFAULT_MODEL)
         self.assertEqual(call["messages"], [{"role": "user", "content": "Hi"}])
-        self.assertEqual(call["temperature"], 1)
+        self.assertEqual(call["temperature"], llm_client.DEFAULT_TEMPERATURE)
         self.assertEqual(call["stream"], True)
         self.assertEqual(call["max_completion_tokens"], 20000)
 
@@ -70,9 +70,9 @@ class TestLLMClientFunctionCalling(unittest.TestCase):
 
         self.assertIs(result, sentinel)
         call = FakeOpenAI.last_instance.chat.completions.calls[0]
-        self.assertEqual(call["model"], "gpt-4.1")
+        self.assertEqual(call["model"], llm_client.DEFAULT_FUNCTION_MODEL)
         self.assertEqual(call["messages"], [{"role": "user", "content": "Run tools"}])
-        self.assertEqual(call["temperature"], 1)
+        self.assertEqual(call["temperature"], llm_client.DEFAULT_TEMPERATURE)
         self.assertEqual(call["stream"], False)
         self.assertEqual(call["tool_choice"], "required")
 

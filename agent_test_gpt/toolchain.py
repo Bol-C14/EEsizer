@@ -113,13 +113,29 @@ _ANALYSIS_TOOLS = {
     "thd_input_range",
 }
 
+# Mapping of analysis tools to the simulation that produces their data.
+_REQUIRED_SIM_FOR_ANALYSIS = {
+    "ac_gain": "ac_simulation",
+    "bandwidth": "ac_simulation",
+    "unity_bandwidth": "ac_simulation",
+    "phase_margin": "ac_simulation",
+    "dc_gain": "dc_simulation",
+    "output_swing": "dc_simulation",
+    "offset": "dc_simulation",
+    "icmr": "dc_simulation",
+    "tran_gain": "transient_simulation",
+    "power": "transient_simulation",
+    "thd_input_range": "transient_simulation",
+    # cmrr_tran runs its own ngspice sweep, so no prerequisite simulation here.
+}
+
 
 def validate_tool_chain(tool_chain: Dict[str, Any]) -> None:
     """Validate tool chain names and ordering before execution.
 
     Rules:
     - All tool names must be in the allowed list.
-    - Any analysis tool must appear after at least one run_ngspice call.
+    - Analysis tools must appear after their prerequisite simulation step.
     - tool_calls must be a list of dicts with a 'name' field.
     """
     if not isinstance(tool_chain, dict) or "tool_calls" not in tool_chain:
@@ -128,7 +144,7 @@ def validate_tool_chain(tool_chain: Dict[str, Any]) -> None:
     if not isinstance(calls, list):
         raise ValueError("tool_chain['tool_calls'] must be a list")
 
-    seen_run = False
+    seen_simulations = set()
     for idx, call in enumerate(calls):
         if not isinstance(call, dict):
             raise ValueError(f"tool call at index {idx} is not a dict")
@@ -136,12 +152,12 @@ def validate_tool_chain(tool_chain: Dict[str, Any]) -> None:
         name = str(raw_name).lower() if raw_name is not None else None
         if name not in _ALLOWED_TOOL_NAMES:
             raise ValueError(f"Unsupported tool '{raw_name}' at index {idx}")
-        if name == "run_ngspice":
-            seen_run = True
-        if name in _ANALYSIS_TOOLS and not seen_run:
-            raise ValueError(f"Analysis tool '{name}' appears before run_ngspice")
-    if any(call.get("name") in _ANALYSIS_TOOLS for call in calls) and not seen_run:
-        raise ValueError("Analysis tools present but no run_ngspice call found")
+        if name in {"dc_simulation", "ac_simulation", "transient_simulation"}:
+            seen_simulations.add(name)
+        required_sim = _REQUIRED_SIM_FOR_ANALYSIS.get(name)
+        if required_sim and required_sim not in seen_simulations:
+            raise ValueError(f"Analysis tool '{name}' requires '{required_sim}' earlier in the tool chain")
+
 
 
 def _infer_simulation_type_from_analysis(analysis_type):
