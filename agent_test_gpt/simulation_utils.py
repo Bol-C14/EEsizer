@@ -6,12 +6,14 @@ import re
 import shutil
 import subprocess
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from scipy.fft import fft, fftfreq
 from scipy.signal import find_peaks
 
+from agent_test_gpt import config
 from agent_test_gpt.netlist_utils import normalize_spice_includes
 
 
@@ -36,8 +38,21 @@ def _ensure_flat_str_list(name, xs):
     return flat
 
 
-def dc_simulation(netlist, input_name, output_node):
-    end_index = netlist.index('.end\n')
+def _out_path(output_dir: str, filename: str) -> str:
+    return str(Path(output_dir) / filename)
+
+
+def _find_end_index(netlist: str) -> int:
+    """Locate the `.end` card regardless of trailing newline/case; raise if missing."""
+
+    match = re.search(r"(?im)^\s*\.end\b", netlist)
+    if not match:
+        raise ValueError("Netlist is missing a `.end` line; cannot append control block.")
+    return match.start()
+
+
+def dc_simulation(netlist, input_name, output_node, output_dir: str = config.RUN_OUTPUT_ROOT):
+    end_index = _find_end_index(netlist)
 
     output_node = _ensure_flat_str_list("output_nodes", output_node)
     output_nodes_str = ' '.join(output_node)
@@ -45,7 +60,7 @@ def dc_simulation(netlist, input_name, output_node):
     simulation_commands = f'''
         .control
           dc Vcm 0 1.2 0.001
-          wrdata output/output_dc.dat {output_nodes_str}
+          wrdata {_out_path(output_dir, "output_dc.dat")} {output_nodes_str}
         .endc
          '''
     new_netlist = netlist[:end_index] + simulation_commands + netlist[end_index:]
@@ -53,36 +68,36 @@ def dc_simulation(netlist, input_name, output_node):
     return new_netlist
 
 
-def ac_simulation(netlist, input_name, output_node):
-    end_index = netlist.index('.end\n')
+def ac_simulation(netlist, input_name, output_node, output_dir: str = config.RUN_OUTPUT_ROOT):
+    end_index = _find_end_index(netlist)
 
     output_node = _ensure_flat_str_list("output_nodes", output_node)
     output_nodes_str = ' '.join(output_node)
     simulation_commands = f'''
         .control
           ac dec 10 1 10G
-          wrdata output/output_ac.dat {output_nodes_str}
+          wrdata {_out_path(output_dir, "output_ac.dat")} {output_nodes_str}
         .endc
          '''
     new_netlist = netlist[:end_index] + simulation_commands + netlist[end_index:]
     return new_netlist
 
 
-def trans_simulation(netlist, input_name, output_node):
-    end_index = netlist.index('.end\n')
+def trans_simulation(netlist, input_name, output_node, output_dir: str = config.RUN_OUTPUT_ROOT):
+    end_index = _find_end_index(netlist)
     output_node = _ensure_flat_str_list("output_nodes", output_node)
     output_nodes_str = ' '.join(output_node)
     simulation_commands = f'''
         .control
           tran 50n 500u
-          wrdata output/output_tran.dat {output_nodes_str} I(vdd) in1
+          wrdata {_out_path(output_dir, "output_tran.dat")} {output_nodes_str} I(vdd) in1
         .endc
          '''
     new_netlist = netlist[:end_index] + simulation_commands + netlist[end_index:]
     return new_netlist
 
 
-def tran_inrange(netlist):
+def tran_inrange(netlist, output_dir: str = config.RUN_OUTPUT_ROOT):
     modified_netlist = re.sub(r'\.control.*?\.endc', '', netlist, flags=re.DOTALL)
     netlist_set = ""
     for line in modified_netlist.splitlines():
@@ -93,7 +108,7 @@ def tran_inrange(netlist):
             # Keep other lines unchanged
             netlist_set += line + "\n"
 
-    end_index = netlist_set.index('.end\n')
+    end_index = _find_end_index(netlist_set)
     simulation_commands = f'''
     .control
       set_numthread = 8
@@ -101,12 +116,12 @@ def tran_inrange(netlist):
       let stop_vcm = 1.25
       let delta_vcm = 0.05
       let vcm_act = start_vcm
-      rm output/output_tran_inrange.dat
+      rm {_out_path(output_dir, "output_tran_inrange.dat")}
 
       while vcm_act <= stop_vcm
         alter Vcm vcm_act
         tran 50n 500u  
-        wrdata output/output_tran_inrange.dat out in1 in2 cm 
+        wrdata {_out_path(output_dir, "output_tran_inrange.dat")} out in1 in2 cm 
         set appendwrite
         let vcm_act = vcm_act + delta_vcm 
       end
@@ -116,9 +131,10 @@ def tran_inrange(netlist):
     return new_netlist
 
 
-def out_swing(filename):
+def out_swing(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
     #vdd=1.2
-    with open('output/netlist.cir', 'r') as f:
+    netlist_path = _out_path(output_dir, "netlist.cir")
+    with open(netlist_path, 'r') as f:
         netlist_content = f.read()
     modified_netlist = re.sub(r'\.control.*?\.endc', '', netlist_content, flags=re.DOTALL)
     updated_lines = []
@@ -136,16 +152,16 @@ def out_swing(filename):
     simulation_commands = f'''
     .control
       dc Vin1 0 1.2 0.00005
-      wrdata output/output_dc_ow.dat out in1
+            wrdata {_out_path(output_dir, "output_dc_ow.dat")} out in1
     .endc
     '''
-    end_index = updated_netlist.index('.end')
+    end_index = _find_end_index(updated_netlist)
     netlist_ow = updated_netlist[:end_index] + simulation_commands + updated_netlist[end_index:]
     print(netlist_ow)
-    with open('output/netlist_ow.cir', 'w') as f:
+    with open(_out_path(output_dir, 'netlist_ow.cir'), 'w') as f:
         f.write(netlist_ow)
-    run_ngspice(netlist_ow,'netlist_ow' )
-    data_dc = np.genfromtxt(f'output/{filename}_ow.dat', skip_header=1)
+    run_ngspice(netlist_ow,'netlist_ow', output_dir=output_dir )
+    data_dc = np.genfromtxt(_out_path(output_dir, f'{filename}_ow.dat'), skip_header=1)
     output = data_dc[0:,1]
     in1 = data_dc[0:,3]
     d_output_d_in1 = np.gradient(output, in1)
@@ -176,9 +192,10 @@ def out_swing(filename):
     return ow
 
 
-def offset(filename):
+def offset(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
     vdd=1.2
-    with open('output/netlist.cir', 'r') as f:
+    netlist_path = _out_path(output_dir, "netlist.cir")
+    with open(netlist_path, 'r') as f:
         netlist_content = f.read()
     modified_netlist = re.sub(r'\.control.*?\.endc', '', netlist_content, flags=re.DOTALL)
     updated_lines = []
@@ -201,16 +218,16 @@ def offset(filename):
     simulation_commands = f'''
     .control
       dc Vin2 0 1.2 0.0001
-      wrdata output/output_dc_offset.dat out
+            wrdata {_out_path(output_dir, "output_dc_offset.dat")} out
     .endc
     '''
-    end_index = updated_netlist.index('.end')
+    end_index = _find_end_index(updated_netlist)
     netlist_offset = updated_netlist[:end_index] + simulation_commands + updated_netlist[end_index:]
     #print(netlist_offset)
-    with open('output/netlist_offset.cir', 'w') as f:
+    with open(_out_path(output_dir, 'netlist_offset.cir'), 'w') as f:
         f.write(netlist_offset)
-    run_ngspice(netlist_offset,'netlist_offset' )
-    data_dc = np.genfromtxt(f'output/{filename}_offset.dat', skip_header=1)
+    run_ngspice(netlist_offset,'netlist_offset', output_dir=output_dir )
+    data_dc = np.genfromtxt(_out_path(output_dir, f'{filename}_offset.dat'), skip_header=1)
 
     # Extract input and output values from the data
     input = data_dc[19:-19, 0]   # Skip first and last points
@@ -231,57 +248,48 @@ def offset(filename):
     return voff
 
 
-def ICMR(filename):
-    vdd=1.2
-    with open('output/netlist.cir', 'r') as f:
+def ICMR(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
+    netlist_path = _out_path(output_dir, "netlist.cir")
+    with open(netlist_path, "r") as f:
         netlist_content = f.read()
 
-    # Remove control block
-    modified_netlist = re.sub(r'\.control.*?\.endc', '', netlist_content, flags=re.DOTALL)
+    modified_netlist = re.sub(r"\.control.*?\.endc", "", netlist_content, flags=re.DOTALL)
 
-    # Update transistor connections
     updated_lines = []
     for line in modified_netlist.splitlines():
         if line.startswith("M4") or line.startswith("M1"):
-            line = re.sub(r'\bin1\b', 'out', line)  # Replace 'in1' with 'out'
-        #if not (line.startswith("Rl") or line.startswith("Cl")):  # Skip lines starting with "Rl" or "Cl"
+            line = re.sub(r"\bin1\b", "out", line)
         updated_lines.append(line)
-    updated_netlist = '\n'.join(updated_lines)
+    updated_netlist = "\n".join(updated_lines)
 
-    # Append simulation commands
-    simulation_commands = '''
+    simulation_commands = f'''
     .control
       dc Vcm 0 1.2 0.001
-      wrdata output/output_dc_icmr.dat out I(vdd)
+      wrdata {_out_path(output_dir, "output_dc_icmr.dat")} out I(vdd)
     .endc
     '''
-    end_index = updated_netlist.index('.end')
+    end_index = _find_end_index(updated_netlist)
     netlist_icmr = updated_netlist[:end_index] + simulation_commands + updated_netlist[end_index:]
 
-    # Write modified netlist to a new file and run simulation
-    with open('output/netlist_icmr.cir', 'w') as f:
+    with open(_out_path(output_dir, "netlist_icmr.cir"), "w") as f:
         f.write(netlist_icmr)
 
-    run_ngspice(netlist_icmr, 'netlist_icmr')
+    run_ngspice(netlist_icmr, "netlist_icmr", output_dir=output_dir)
 
-    # Read simulation data
-    data_dc = np.genfromtxt(f'output/{filename}_icmr.dat', skip_header=1)
+    data_dc = np.genfromtxt(_out_path(output_dir, f"{filename}_icmr.dat"), skip_header=1)
 
-    # Extract relevant data
-    input_vals = data_dc[:, 0]   # Skip first and last points
+    input_vals = data_dc[:, 0]
     output_vals = data_dc[:, 1]
 
     gradient = np.gradient(output_vals, input_vals)
     vos = np.abs(output_vals - input_vals)
 
-    # Find the index of gradient where equals 1.
-
-    unit_gain_indices = np.where(gradient>=0.95)[0]
+    unit_gain_indices = np.where(gradient >= 0.95)[0]
     vos_indices = np.where(vos <= 0.02)[0]
-    #print(unit_gain_indices)  # Using a small tolerance
+
     if len(vos_indices) > 1:
-        unit_gain_index1 = vos_indices[0]  # Take the first occurrence
-        unit_gain_index2 = vos_indices[-1]  # # Last crossing point
+        unit_gain_index1 = vos_indices[0]
+        unit_gain_index2 = vos_indices[-1]
 
         ic_min_grad = input_vals[unit_gain_index1]
         ic_min_voff = input_vals[vos_indices[0]]
@@ -291,24 +299,19 @@ def ICMR(filename):
         ic_min = max(ic_min_grad, ic_min_voff)
         ic_max = min(ic_max_grad, ic_max_voff)
         icmr_out = ic_max - ic_min
-    # Verify we have a proper range
     elif len(unit_gain_indices) == 1:
         icmr_out = 0
         print("Warning: Only one unit gain point found")
-
     else:
         print("Warning:no unit gain point found")
-        icmr_out = 0  # No valid range found
+        icmr_out = 0
 
     print(icmr_out)
-    #print(f'ic_min = {ic_min}')
-    #print(f'ic_max = {ic_max}')
-
     return icmr_out
 
 
-def tran_gain(file_name):
-    data_tran = np.genfromtxt(f'output/{file_name}.dat', skip_header=1)
+def tran_gain(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
+    data_tran = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
     num_columns = data_tran.shape[1]
 
     # for one output node
@@ -332,8 +335,8 @@ def tran_gain(file_name):
     return tran_gain
 
 
-def ac_gain(file_name):
-    data_ac = np.genfromtxt(f'output/{file_name}.dat', skip_header=1)
+def ac_gain(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
+    data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
     num_columns = data_ac.shape[1]
 
     # for one output node
@@ -353,8 +356,8 @@ def ac_gain(file_name):
     return gain
 
 
-def bandwidth(file_name):
-    data_ac = np.genfromtxt(f'output/{file_name}.dat', skip_header=1)
+def bandwidth(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
+    data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
     num_columns = data_ac.shape[1]
     frequency = data_ac[:, 0]
 
@@ -385,8 +388,8 @@ def bandwidth(file_name):
     return bandwidth
 
 
-def unity_bandwidth(file_name):
-    data_ac = np.genfromtxt(f'output/{file_name}.dat', skip_header=1)
+def unity_bandwidth(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
+    data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
     num_columns = data_ac.shape[1]
     frequency = data_ac[:, 0]
 
@@ -417,8 +420,8 @@ def unity_bandwidth(file_name):
     return bandwidth
 
 
-def phase_margin(file_name):
-    data_ac = np.genfromtxt(f'output/{file_name}.dat', skip_header=1)
+def phase_margin(file_name, output_dir: str = config.RUN_OUTPUT_ROOT):
+    data_ac = np.genfromtxt(_out_path(output_dir, f'{file_name}.dat'), skip_header=1)
     num_columns = data_ac.shape[1]
     frequency = data_ac[:,0]
     # for one output node
@@ -463,9 +466,9 @@ def calculate_static_current(simulation_data):
         return None
 
 
-def stat_power(filename, vdd=1.8):
+def stat_power(filename, vdd=1.8, output_dir: str = config.RUN_OUTPUT_ROOT):
 
-    data_trans = np.genfromtxt(f'output/{filename}.dat')
+    data_trans = np.genfromtxt(_out_path(output_dir, f'{filename}.dat'))
     num_columns = data_trans.shape[1]
     if num_columns == 3:
         iout = data_trans[:, 3]
@@ -482,8 +485,8 @@ def stat_power(filename, vdd=1.8):
     return static_power
 
 
-def cmrr_tran(netlist):
-    with open('output/netlist.cir', 'r') as f:
+def cmrr_tran(netlist, output_dir: str = config.RUN_OUTPUT_ROOT):
+    with open(_out_path(output_dir, "netlist.cir"), 'r') as f:
         netlist_content = f.read()
 
     modified_netlist = re.sub(r'\.control.*?\.endc', '', netlist_content, flags=re.DOTALL)
@@ -514,19 +517,19 @@ def cmrr_tran(netlist):
         alter Vin1 vcm_act
         alter Vin2 vcm_act
         ac dec 10 1 10G
-        wrdata output/output_inrange_cmrr.dat out
+                wrdata {_out_path(output_dir, "output_inrange_cmrr.dat")} out
         set appendwrite
         let vcm_act = vcm_act + delta_vcm 
       end
     .endc
     '''
-    end_index = updated_netlist.index('.end')
+    end_index = _find_end_index(updated_netlist)
     netlist_cmrr = updated_netlist[:end_index] + simulation_commands + updated_netlist[end_index:]
     print(netlist_cmrr)
-    with open('output/netlist_cmrr.cir', 'w') as f:
+    with open(_out_path(output_dir, 'netlist_cmrr.cir'), 'w') as f:
         f.write(netlist_cmrr)
-    run_ngspice(netlist_cmrr,'netlist_cmrr' )
-    data_ac = np.genfromtxt('output/output_inrange_cmrr.dat')
+    run_ngspice(netlist_cmrr,'netlist_cmrr', output_dir=output_dir )
+    data_ac = np.genfromtxt(_out_path(output_dir, 'output_inrange_cmrr.dat'))
     freq = data_ac[:, 0]
     output = data_ac[:, 1] + 1j * data_ac[:, 2]
     # Find indices where freq = 10 GHz (end of a block)
@@ -548,20 +551,20 @@ def cmrr_tran(netlist):
     return cmrr_ac,cmrr_ac_max
 
 
-def thd_input_range(filename):
+def thd_input_range(filename, output_dir: str = config.RUN_OUTPUT_ROOT):
     thd_values = []
     valid_inputs = []
     threshold_thd = -24.7
     #read origin netlist
-    with open('output/netlist.cir', 'r') as file:
+    with open(_out_path(output_dir, "netlist.cir"), 'r') as file:
       netlist0 = file.read()
     #replace the simulation setting
-    netlist_inrange = tran_inrange(netlist0)
+    netlist_inrange = tran_inrange(netlist0, output_dir=output_dir)
     #print(netlist_inrange)
-    run_ngspice(netlist_inrange, 'netlist_inrange')
+    run_ngspice(netlist_inrange, 'netlist_inrange', output_dir=output_dir)
 
     #data preperation
-    data_tran = np.genfromtxt(f'output/{filename}_inrange.dat')
+    data_tran = np.genfromtxt(_out_path(output_dir, f'{filename}_inrange.dat'))
     time = data_tran[:,0]
     other_data = data_tran[:, 1:]  # Extract other columns
     iteration_indices = np.where(time == 0)[0]
@@ -774,13 +777,13 @@ def read_txt_as_string(file_path):
         return None
 
 
-def run_ngspice(circuit, filename):
-    output_file = 'output/op.txt'
-    cir_path = f'output/{filename}.cir'
-    out_dir = os.path.dirname(cir_path)
-    if not os.path.exists(out_dir):
-        print(f'Path `{out_dir}` does not exist, creating it.')
-        os.makedirs(out_dir, exist_ok=True)
+def run_ngspice(circuit, filename, output_dir: str = config.RUN_OUTPUT_ROOT, timeout_s: int = 120):
+    output_path = Path(output_dir)
+    output_file = output_path / 'op.txt'
+    cir_path = output_path / f'{filename}.cir'
+    if not output_path.exists():
+        print(f'Creating output directory `{output_path}`.')
+        output_path.mkdir(parents=True, exist_ok=True)
     normalized = normalize_spice_includes(circuit)
     with open(cir_path, 'w') as f:
         f.write(normalized)
@@ -794,7 +797,6 @@ def run_ngspice(circuit, filename):
     if not ngspice_path:
         conda_prefix = os.getenv('CONDA_PREFIX') or os.getenv('CONDA_DEFAULT_ENV')
         if conda_prefix:
-            # If CONDA_PREFIX points to env root, prefer its bin
             candidate = os.path.join(os.getenv('CONDA_PREFIX', conda_prefix), 'bin', 'ngspice')
             if os.path.exists(candidate) and os.access(candidate, os.X_OK):
                 ngspice_path = candidate
@@ -817,14 +819,17 @@ def run_ngspice(circuit, filename):
     if not ngspice_path:
         msg = 'NGSPICE_NOT_FOUND: set NGSPICE_PATH or install ngspice (or place binary in conda env bin)'
         print(msg)
-        # Write a minimal op.txt so downstream code can detect missing simulation
         with open(output_file, 'w') as f:
             f.write(msg + "\n")
         return False
 
-    # Run ngspice with the discovered binary
     try:
-        result = subprocess.run([ngspice_path, '-b', f'output/{filename}.cir'], capture_output=True, text=True)
+        result = subprocess.run(
+            [ngspice_path, '-b', str(cir_path)],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
         ngspice_output = result.stdout + ('\n' + result.stderr if result.stderr else '')
         with open(output_file, "w") as f:
             f.write(ngspice_output)
@@ -832,8 +837,14 @@ def run_ngspice(circuit, filename):
             print(f"NGspice failed with return code {result.returncode}")
             return False
         if "Could not find include file" in ngspice_output:
-            print("NGspice include resolution failed; see output/op.txt")
+            print("NGspice include resolution failed; see op.txt")
             return False
+    except subprocess.TimeoutExpired as e:
+        msg = f"NGSPICE_TIMEOUT after {timeout_s}s: {e}"
+        with open(output_file, "w") as f:
+            f.write(msg)
+        print(msg)
+        return False
     except Exception as e:
         ngspice_output = f"Error running NGspice: {str(e)}"
         with open(output_file, "w") as f:
