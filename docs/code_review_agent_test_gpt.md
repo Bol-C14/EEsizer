@@ -38,8 +38,10 @@ Scope: current `agent_test_gpt` package after the initial refactors (LLM prompts
 - Mitigation: optimization loop supports configurable retry with exponential backoff via `max_retries` and `retry_backoff_seconds`, and delay is optional (`llm_delay_seconds`).
 
 - Metric and tool naming drift: simulation/analysis naming is hand-built and partially inferred (`agent_test_gpt/toolchain.py:86-205`), making it easy for LLM responses to fall out of sync with actual tool implementations.
+- Mitigation: tool-chain validation enforces an allowlist/order and normalizes names to the supported set to reduce drift.
 
 - Reporting assumes CSVs exist and are well-formed: `plot_optimization_history` reads CSV without guardrails and uses derived columns directly (`agent_test_gpt/reporting.py:52-92`), so missing files or malformed data will crash plotting.
+- Mitigation: reporting now validates file existence/size, fails fast on unreadable CSVs, and checks required columns before plotting.
 
 - Reproducibility gaps: runs depend on ambient cwd, existing `output` contents, environment variables for ngspice, and whatever the LLM returns. There is no seed/control for randomness or snapshotting of prompts/responses beyond ad-hoc prints.
 

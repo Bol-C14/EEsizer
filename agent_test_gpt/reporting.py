@@ -1,12 +1,15 @@
 """Reporting helpers for optimization runs."""
 
+import os
 import shutil
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from agent_test_gpt import config
+from agent_test_gpt.logging_utils import get_logger
+
+_logger = get_logger(__name__)
 
 
 def run_multiple_optimizations(target_values, sim_netlist, tool_chain, extract_number, optimization, num_runs=1):
@@ -46,8 +49,33 @@ def plot_subplot(ax, df, colors, x, y, xlabel, ylabel, ylim_min, ylim_max, fill_
         ax.set_yscale("log")
 
 
+def _validate_history_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    required_cols = {
+        "iteration",
+        "pm_output",
+        "ubw_output",
+        "tr_gain_output",
+        "pr_output",
+        "cmrr_output",
+        "output_swing_output",
+        "thd_output",
+        "input_offset_output",
+        "icmr_output",
+    }
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns in history csv: {sorted(missing)}")
+    return df
+
+
 def plot_optimization_history(csv_path: str, output_pdf: str, max_batches=5):
-    df = pd.read_csv(csv_path)
+    if not os.path.exists(csv_path) or os.stat(csv_path).st_size == 0:
+        raise FileNotFoundError(f"History CSV not found or empty: {csv_path}")
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to read history CSV {csv_path}: {exc}") from exc
+    df = _validate_history_dataframe(df)
     df["batch"] = (df["iteration"] == 0).cumsum()
     df["bw_output_dB"] = 20 * np.log10(df["ubw_output"] + 1e-9)
 

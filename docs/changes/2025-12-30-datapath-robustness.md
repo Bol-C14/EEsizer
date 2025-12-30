@@ -67,3 +67,9 @@ Files:
 - Split `simulation_utils.py` into smaller modules under `agent_test_gpt/simulations/` (builders, runners, metrics).
 - Improve prompt schema enforcement for nodes and tool-calls (JSON schema / stricter contracts).
 - Add artifact manifest per run directory for reproducibility.
+
+## Addendum (current mitigations)
+- LLM client configuration is now driven by environment variables (`LLM_MODEL`, `LLM_FUNCTION_MODEL`, `LLM_TEMPERATURE`) with structured logging and hard failures on errors.
+- Optimization loop wraps LLM calls with configurable retries/backoff (`max_retries`, `retry_backoff_seconds`, optional `llm_delay_seconds`) instead of fixed sleeps.
+- Tool-chain validation enforces an allowlist and ordering, reducing naming drift and mismatched tool responses.
+- Reporting validates CSV existence/columns and raises clear errors before plotting to avoid silent failures on missing/malformed history.
