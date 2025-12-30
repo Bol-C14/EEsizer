@@ -18,6 +18,7 @@ from agent_test_gpt.netlist_utils import (
     nodes_extract,
     extract_code,
     extract_number,
+    sanitize_netlist,
 )
 from agent_test_gpt.simulation_utils import (
     dc_simulation,
@@ -54,6 +55,7 @@ from agent_test_gpt.reporting import (
     copy_netlist,
     plot_optimization_history,
 )
+from agent_test_gpt.models import TaskQuestions
 #%%
 from dotenv import load_dotenv
 import os
@@ -145,51 +147,28 @@ Vid diffin 0 AC 1 SIN (0 1u 10k 0 0)
 #%% md
 # ## Task Decpmosition
 #%%
+# Sanitize the input netlist to strip control blocks and unsafe includes before any use.
+netlist = sanitize_netlist(netlist)
 ## prompt for tasks generation based on user input
 
 #task generation
+def _parse_json_payload(raw: str) -> dict:
+    cleaned = raw.strip().strip("`").replace("json", "").strip()
+    return json.loads(cleaned)
+
+
+def parse_tasks_response(raw: str) -> TaskQuestions:
+    payload = _parse_json_payload(raw)
+    return TaskQuestions.from_json(payload)
+
+
 tasks_generation_prompt = prompts.build_tasks_generation_prompt(tasks_generation_question, netlist)
-
-tasks = make_chat_completion_request(tasks_generation_prompt) # json format plain text
-
-#%%
-type_question = ""
-
-# set type_question, node_question, sim_question, sizing_question globally
-def get_tasks(tasks):
-    try:
-        # Step 1: Remove triple backticks (if present)
-        tasks = tasks.strip().strip('`')  # Remove leading/trailing backticks and whitespace
-        tasks = tasks.replace("json", "").strip()
-        # Step 2: Print the cleaned input for debugging
-        print("Cleaned JSON string:")
-        print(tasks)
-
-        # Step 3: Parse the JSON string into a dictionary
-        tasks_output = json.loads(tasks)
-
-        # Step 4: Process the questions
-        for question_dict in tasks_output["questions"]:
-            for key, value in question_dict.items():
-                #print(f"{key}: {value}")  # Print or process the key-value pairs
-                # assign them to globals (not recommended unless necessary)
-                globals()[key] = value
-
-
-        ## key contains four stuff four different question, which naturally becomes four glpbal variables
-        # type_question = "str"
-        # node_question = "str"
-        # sim_question = "str"
-        # sizing_question = "str"
-        # ----
-
-    except json.JSONDecodeError as e:
-        print("Error parsing JSON:", e)
-        print("Invalid JSON string:", tasks)
-    except KeyError as e:
-        print(f"Missing key in JSON: {e}")
-
-get_tasks(tasks)
+tasks_raw = make_chat_completion_request(tasks_generation_prompt)  # json format plain text
+tasks_parsed = parse_tasks_response(tasks_raw)
+type_question = tasks_parsed.type_question
+node_question = tasks_parsed.node_question
+sim_question = tasks_parsed.sim_question
+sizing_question = tasks_parsed.sizing_question
 
 #%%
 target_value_prompt = prompts.build_target_value_prompt(tasks_generation_question)
@@ -213,27 +192,25 @@ print(f"input_nodes:{input_nodes}")
 print(f"output_nodes:{output_nodes}")
 print(f"source_names:{source_names}")
 #%%
-Gain_init = None
-Bw_init = None
-UBw_init = None
-Pm_init = None
-CMRR_init = None
-Power_init = None
-Thd_init = None
-OW_init = None
-Offset_init = None
-ICMR_init = None
+def build_initial_metrics(metrics: dict) -> dict:
+    """Map toolchain metrics into the optimization runner's expected initial fields."""
+    return {
+        "gain_output": metrics.get("gain"),
+        "tr_gain_output": metrics.get("tran_gain"),
+        "output_swing_output": metrics.get("output_swing"),
+        "input_offset_output": metrics.get("offset"),
+        "icmr_output": metrics.get("icmr"),
+        "ubw_output": metrics.get("unity_bandwidth"),
+        "pm_output": metrics.get("phase_margin"),
+        "pr_output": metrics.get("power"),
+        "cmrr_output": metrics.get("cmrr"),
+        "thd_output": metrics.get("thd"),
+    }
 
-"""
-LLM can use this to decide which tool to call based on user input
-here we have: dc_simulation, ac_simulation, transient_simulation, run_ngspice, ac_gain, tran_gain, output_swing, offset, icmr, bandwidth, unity_bandwidth, phase_margin, cmrr_tran, power, thd_input_range
 
-"""
-def tool_calling(tool_chain):
-    global Gain_init, Bw_init, Pm_init, Dc_Gain_init, Tran_Gain_init, CMRR_init, Power_init, InputRange_Init, Thd_init, OW_init, Offset_init, UBw_init, ICMR_init
-
+def tool_calling(tool_chain, netlist_text, source_names, output_nodes):
     context = ToolCallingContext(
-        netlist=netlist,
+        netlist=netlist_text,
         source_names=source_names,
         output_nodes=output_nodes,
     )
@@ -259,35 +236,7 @@ def tool_calling(tool_chain):
         thd_input_range=thd_input_range,
     )
     runner = ToolChainRunner(context, deps)
-    result = runner.run(tool_chain)
-
-    metrics = result.metrics
-    if metrics["gain"] is not None:
-        Gain_init = metrics["gain"]
-    if metrics["output_swing"] is not None:
-        OW_init = metrics["output_swing"]
-    if metrics["icmr"] is not None:
-        ICMR_init = metrics["icmr"]
-    if metrics["offset"] is not None:
-        Offset_init = metrics["offset"]
-    if metrics["tran_gain"] is not None:
-        Tran_Gain_init = metrics["tran_gain"]
-    if metrics["bandwidth"] is not None:
-        Bw_init = metrics["bandwidth"]
-    if metrics["unity_bandwidth"] is not None:
-        UBw_init = metrics["unity_bandwidth"]
-    if metrics["phase_margin"] is not None:
-        Pm_init = metrics["phase_margin"]
-    if metrics["cmrr"] is not None:
-        CMRR_init = metrics["cmrr"]
-    if metrics["power"] is not None:
-        Power_init = metrics["power"]
-    if metrics["thd"] is not None:
-        Thd_init = metrics["thd"]
-    if metrics["input_range"] is not None:
-        InputRange_Init = metrics["input_range"]
-
-    return result.sim_output, result.sim_netlist
+    return runner.run(tool_chain)
 
 print(sim_question)
 #%%
@@ -315,7 +264,9 @@ tool_chain_row = combine_results(formatted_sim_types, formatted_sim_tools, forma
 tool_chain = {"tool_calls": tool_chain_row}
 print("----------------------function used-----------------------------")
 print(tool_chain)
-sim_output, sim_netlist = tool_calling(tool_chain)
+tool_result = tool_calling(tool_chain, netlist, source_names, output_nodes)
+sim_output = tool_result.sim_output
+sim_netlist = tool_result.sim_netlist
 print("-------------------------result---------------------------------")
 print(sim_output)
 print("-------------------------netlist---------------------------------")
@@ -331,6 +282,8 @@ def optimization(tools, target_values, sim_netlist, extracting_method):
         sim_output=sim_output,
         sizing_question=sizing_question,
         type_identified=type_identified,
+        source_names=source_names,
+        output_nodes=output_nodes,
     )
 
     def _missing_dc_gain(*_args, **_kwargs):
@@ -338,6 +291,10 @@ def optimization(tools, target_values, sim_netlist, extracting_method):
 
     deps = OptimizationDeps(
         make_chat_completion_request=make_chat_completion_request,
+        sanitize_netlist=sanitize_netlist,
+        dc_simulation=dc_simulation,
+        ac_simulation=ac_simulation,
+        trans_simulation=trans_simulation,
         run_ngspice=run_ngspice,
         filter_lines=filter_lines,
         convert_to_csv=convert_to_csv,
@@ -359,18 +316,7 @@ def optimization(tools, target_values, sim_netlist, extracting_method):
     )
     config = OptimizationConfig()
     runner = OptimizationRunner(context, deps, config)
-    initial_metrics = {
-        "gain_output": Gain_init,
-        "tr_gain_output": Tran_Gain_init,
-        "output_swing_output": OW_init,
-        "input_offset_output": Offset_init,
-        "icmr_output": ICMR_init,
-        "ubw_output": UBw_init,
-        "pm_output": Pm_init,
-        "pr_output": Power_init,
-        "cmrr_output": CMRR_init,
-        "thd_output": Thd_init,
-    }
+    initial_metrics = build_initial_metrics(tool_result.metrics)
     return runner.run(tools, target_values, sim_netlist, extracting_method, initial_metrics)
 #%%
 results = run_multiple_optimizations(target_values, sim_netlist, tool_chain, extract_number, optimization)

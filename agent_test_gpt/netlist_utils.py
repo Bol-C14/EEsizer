@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 _INCLUDE_PATTERN = re.compile(r"^\s*\.include\s+['\"]?(?P<path>[^'\"\s]+)['\"]?", re.IGNORECASE | re.MULTILINE)
+_CONTROL_BLOCK_PATTERN = re.compile(r"\.control.*?\.endc", re.IGNORECASE | re.DOTALL)
 
 
 def _resolve_spice_include_path(raw_path: str) -> str | None:
@@ -53,6 +54,49 @@ def normalize_spice_includes(netlist_text: str) -> str:
         return match.group(0).replace(raw_path, resolved, 1)
 
     return _INCLUDE_PATTERN.sub(_repl, netlist_text)
+
+
+def strip_control_blocks(netlist_text: str) -> str:
+    """Remove any existing .control/.endc blocks to avoid LLM-injected commands."""
+    return _CONTROL_BLOCK_PATTERN.sub("", netlist_text)
+
+
+def _is_safe_include(path: str) -> bool:
+    # Reject absolute paths or traversal attempts
+    p = Path(path)
+    if p.is_absolute():
+        return False
+    parts = p.parts
+    return ".." not in parts
+
+
+def sanitize_netlist(netlist_text: str, max_lines: int = 20000) -> str:
+    """Strip unsafe constructs from an LLM/user-provided netlist before simulation.
+
+    - Remove any .control/.endc blocks (we inject our own).
+    - Drop .include lines that point to absolute paths or contain traversal.
+    - Enforce a line-count ceiling to avoid runaway payloads.
+    """
+    netlist_text = strip_control_blocks(netlist_text)
+
+    safe_lines: list[str] = []
+    for line in netlist_text.splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith(".include"):
+            match = _INCLUDE_PATTERN.match(line)
+            if not match:
+                # Skip malformed include
+                continue
+            inc_path = match.group("path")
+            if not _is_safe_include(inc_path):
+                # Drop unsafe include
+                continue
+        safe_lines.append(line)
+
+    if len(safe_lines) > max_lines:
+        raise ValueError(f"netlist too large ({len(safe_lines)} lines > {max_lines})")
+
+    return "\n".join(safe_lines) + ("\n" if not netlist_text.endswith("\n") else "")
 
 
 def nodes_extract(node):
