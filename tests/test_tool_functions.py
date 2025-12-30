@@ -9,17 +9,17 @@ from agent_test_gpt import toolchain
 
 class TestSpiceIncludeHelpers(unittest.TestCase):
     def test_resolve_spice_include_path_absolute(self):
-        candidate = Path("agent_test_gpt/ptm_90.txt").resolve()
+        candidate = Path("agent_test_gpt/resources/ptm_90.txt").resolve()
         resolved = netlist_utils._resolve_spice_include_path(str(candidate))
         self.assertEqual(resolved, str(candidate))
 
     def test_resolve_spice_include_path_search_roots(self):
         resolved = netlist_utils._resolve_spice_include_path("ptm_90.txt")
-        self.assertEqual(resolved, "agent_test_gpt/ptm_90.txt")
+        self.assertEqual(resolved, "agent_test_gpt/resources/ptm_90.txt")
 
     def test_normalize_spice_includes(self):
         netlist = ".include 'ptm_90.txt'\nR1 out 0 1k\n"
-        expected = ".include 'agent_test_gpt/ptm_90.txt'\nR1 out 0 1k\n"
+        expected = ".include 'agent_test_gpt/resources/ptm_90.txt'\nR1 out 0 1k\n"
         self.assertEqual(netlist_utils.normalize_spice_includes(netlist), expected)
 
 
