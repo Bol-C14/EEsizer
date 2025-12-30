@@ -17,9 +17,9 @@ def _normalize_call(parsed_obj: Dict[str, Any] | None, tool_call_obj) -> Dict[st
         sim_tool = "run_ngspice"
 
     return {
-        "simulation_type": sim_type,
-        "analysis_type": analysis,
-        "simulation_tool": sim_tool,
+        "simulation_type": str(sim_type).lower() if sim_type else sim_type,
+        "analysis_type": str(analysis).lower() if analysis else analysis,
+        "simulation_tool": str(sim_tool).lower() if sim_tool else sim_tool,
         "raw_args": parsed_obj,
     }
 
@@ -79,6 +79,71 @@ def extract_tool_data(tool):
     return tool_data_list
 
 
+_ALLOWED_TOOL_NAMES = {
+    "dc_simulation",
+    "ac_simulation",
+    "transient_simulation",
+    "run_ngspice",
+    "ac_gain",
+    "dc_gain",
+    "output_swing",
+    "offset",
+    "icmr",
+    "tran_gain",
+    "bandwidth",
+    "unity_bandwidth",
+    "phase_margin",
+    "cmrr_tran",
+    "power",
+    "thd_input_range",
+}
+
+_ANALYSIS_TOOLS = {
+    "ac_gain",
+    "dc_gain",
+    "output_swing",
+    "offset",
+    "icmr",
+    "tran_gain",
+    "bandwidth",
+    "unity_bandwidth",
+    "phase_margin",
+    "cmrr_tran",
+    "power",
+    "thd_input_range",
+}
+
+
+def validate_tool_chain(tool_chain: Dict[str, Any]) -> None:
+    """Validate tool chain names and ordering before execution.
+
+    Rules:
+    - All tool names must be in the allowed list.
+    - Any analysis tool must appear after at least one run_ngspice call.
+    - tool_calls must be a list of dicts with a 'name' field.
+    """
+    if not isinstance(tool_chain, dict) or "tool_calls" not in tool_chain:
+        raise ValueError("tool_chain must be a dict with key 'tool_calls'")
+    calls = tool_chain.get("tool_calls")
+    if not isinstance(calls, list):
+        raise ValueError("tool_chain['tool_calls'] must be a list")
+
+    seen_run = False
+    for idx, call in enumerate(calls):
+        if not isinstance(call, dict):
+            raise ValueError(f"tool call at index {idx} is not a dict")
+        raw_name = call.get("name")
+        name = str(raw_name).lower() if raw_name is not None else None
+        if name not in _ALLOWED_TOOL_NAMES:
+            raise ValueError(f"Unsupported tool '{raw_name}' at index {idx}")
+        if name == "run_ngspice":
+            seen_run = True
+        if name in _ANALYSIS_TOOLS and not seen_run:
+            raise ValueError(f"Analysis tool '{name}' appears before run_ngspice")
+    if any(call.get("name") in _ANALYSIS_TOOLS for call in calls) and not seen_run:
+        raise ValueError("Analysis tools present but no run_ngspice call found")
+
+
 def _infer_simulation_type_from_analysis(analysis_type):
     """Infer a simulation type from an analysis_type string or list when simulation_type is missing.
 
@@ -91,13 +156,13 @@ def _infer_simulation_type_from_analysis(analysis_type):
     if not analysis_type:
         return None
     if isinstance(analysis_type, list):
-        candidates = analysis_type
+        candidates = [str(c).strip().lower() for c in analysis_type if str(c).strip()]
     else:
-        candidates = [s.strip() for s in str(analysis_type).split(",") if s.strip()]
+        candidates = [s.strip().lower() for s in str(analysis_type).split(",") if s.strip()]
 
     ac_keywords = {"ac_gain", "bandwidth", "unity_bandwidth", "phase_margin", "cmrr_tran", "cmrr"}
     tran_keywords = {"tran_gain", "thd_input_range", "cmrr_tran"}
-    dc_keywords = {"output_swing", "offset", "ICMR", "power"}
+    dc_keywords = {"output_swing", "offset", "icmr", "power"}
 
     for c in candidates:
         if c in ac_keywords:
@@ -128,6 +193,8 @@ def format_simulation_types(tool_data_list):
         if not sim_type:
             sim_type = "dc"  # safe default
 
+        sim_type = str(sim_type).lower()
+
         sim_name = f"{sim_type}_simulation"
         if sim_name not in unique_sim_types:
             unique_sim_types.add(sim_name)
@@ -149,6 +216,8 @@ def format_simulation_tools(tool_data_list):
             sim_tool = tool_data.get("raw_args", {}).get("tool") or tool_data.get("raw_args", {}).get("tool_name")
         if not sim_tool:
             sim_tool = "run_ngspice"
+
+        sim_tool = str(sim_tool).lower()
 
         if sim_tool not in unique_sim_tools:
             unique_sim_tools.add(sim_tool)
@@ -183,11 +252,11 @@ def format_analysis_types(tool_data_list):
 
         # If analysis_type exists, normalize it
         if isinstance(analysis_type, str):
-            analyses = [a.strip() for a in analysis_type.split(",") if a.strip()]
+            analyses = [a.strip().lower() for a in analysis_type.split(",") if a.strip()]
         elif isinstance(analysis_type, list):
-            analyses = analysis_type
+            analyses = [str(a).strip().lower() for a in analysis_type if str(a).strip()]
         else:
-            analyses = [str(analysis_type)]
+            analyses = [str(analysis_type).strip().lower()]
 
         for analysis in analyses:
             if analysis in ["cmrr_tran", "thd_input_range"]:

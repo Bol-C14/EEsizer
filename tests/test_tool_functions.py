@@ -164,6 +164,26 @@ class TestToolFormatting(unittest.TestCase):
         self.assertEqual(netlist_utils.extract_number("10 MHz"), 10.0)
         self.assertIsNone(netlist_utils.extract_number("no number"))
 
+    def test_validate_tool_chain_ok(self):
+        chain = {
+            "tool_calls": [
+                {"name": "ac_simulation"},
+                {"name": "run_ngspice"},
+                {"name": "ac_gain"},
+            ]
+        }
+        toolchain.validate_tool_chain(chain)
+
+    def test_validate_tool_chain_invalid_name(self):
+        chain = {"tool_calls": [{"name": "ac_simulation"}, {"name": "unknown_tool"}]}
+        with self.assertRaises(ValueError):
+            toolchain.validate_tool_chain(chain)
+
+    def test_validate_tool_chain_analysis_before_run(self):
+        chain = {"tool_calls": [{"name": "ac_gain"}, {"name": "run_ngspice"}]}
+        with self.assertRaises(ValueError):
+            toolchain.validate_tool_chain(chain)
+
 
 if __name__ == "__main__":
     unittest.main()
