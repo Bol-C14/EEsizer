@@ -1,84 +1,80 @@
 """Helpers for parsing and formatting tool calls."""
 
 import json
+from typing import Any, Dict, List
+
+
+def _normalize_call(parsed_obj: Dict[str, Any] | None, tool_call_obj) -> Dict[str, Any]:
+    parsed_obj = parsed_obj or {}
+    sim_type = parsed_obj.get("simulation_type")
+    analysis = parsed_obj.get("analysis_type")
+    sim_tool = parsed_obj.get("simulation_tool")
+
+    if not sim_tool:
+        sim_tool = getattr(tool_call_obj.function, "name", None) or getattr(tool_call_obj, "name", None) or "run_ngspice"
+
+    if str(sim_tool).lower() == "universal_circuit_tool":
+        sim_tool = "run_ngspice"
+
+    return {
+        "simulation_type": sim_type,
+        "analysis_type": analysis,
+        "simulation_tool": sim_tool,
+        "raw_args": parsed_obj,
+    }
+
+
+def _parse_arguments(arguments: Any) -> List[Dict[str, Any]]:
+    """Safely parse tool call arguments into a list of dicts, without eval."""
+    if isinstance(arguments, dict):
+        return [arguments]
+    if isinstance(arguments, list):
+        return [item for item in arguments if isinstance(item, dict)]
+    if not isinstance(arguments, str):
+        return []
+
+    arg_str = arguments.strip()
+    if not arg_str:
+        return []
+
+    # First try direct JSON
+    try:
+        parsed = json.loads(arg_str)
+        if isinstance(parsed, dict):
+            return [parsed]
+        if isinstance(parsed, list):
+            return [item for item in parsed if isinstance(item, dict)]
+    except Exception:
+        pass
+
+    # Next, try concatenated JSON objects: {}{}
+    try:
+        combined = "[" + arg_str.replace("}{", "},{") + "]"
+        parsed_list = json.loads(combined)
+        if isinstance(parsed_list, list):
+            return [item for item in parsed_list if isinstance(item, dict)]
+    except Exception:
+        pass
+
+    # Give up and return empty
+    return []
 
 
 def extract_tool_data(tool):
-    """Extract tool call data from all tool calls in the tool object.
-
-    Robust behavior and fallbacks:
-    - Safely parse `function.arguments` whether it's JSON, a concatenated JSON objects string, or a dict.
-    - If `simulation_tool` is missing, fallback to the tool-call function name or a sensible default ('run_ngspice').
-    - Return a list of normalized dicts with keys: simulation_type, analysis_type, simulation_tool, raw_args.
-    """
+    """Extract tool call data from all tool calls in the tool object, safely."""
     message = tool.choices[0].message
     tool_data_list = []
 
-    # Helper to normalize a single parsed dict and a tool_call object
-    def _normalize(parsed_obj, tool_call_obj):
-        if not isinstance(parsed_obj, dict):
-            parsed_obj = {}
-        sim_type = parsed_obj.get("simulation_type")
-        analysis = parsed_obj.get("analysis_type")
-        sim_tool = parsed_obj.get("simulation_tool")
-
-        # Fallbacks for simulation_tool
-        if not sim_tool:
-            sim_tool = getattr(tool_call_obj.function, "name", None) \
-                       or getattr(tool_call_obj, "name", None) \
-                       or "run_ngspice"
-
-        # Notebook schema uses a single wrapper tool name; map it to our local runner.
-        if str(sim_tool).lower() == "universal_circuit_tool":
-            sim_tool = "run_ngspice"
-
-        return {
-            "simulation_type": sim_type,
-            "analysis_type": analysis,
-            "simulation_tool": sim_tool,
-            "raw_args": parsed_obj,
-        }
-
     for tool_call in getattr(message, "tool_calls", []) or []:
         arguments = getattr(tool_call.function, "arguments", None)
-
-        # If arguments is already a dict-like object
-        if isinstance(arguments, dict):
-            tool_data_list.append(_normalize(arguments, tool_call))
+        parsed_items = _parse_arguments(arguments)
+        if not parsed_items:
+            if isinstance(arguments, str) and not arguments.strip():
+                continue  # silently ignore empty argument blobs
+            tool_data_list.append(_normalize_call({}, tool_call))
             continue
-
-        # If arguments is a string, try several parse strategies
-        parsed = None
-        if isinstance(arguments, str):
-            arg_str = arguments.strip()
-            # Attempt JSON parse
-            try:
-                parsed = json.loads(arg_str)
-            except Exception:
-                # Try to coerce concatenated JSON objects into a list: '}{' -> '},{'
-                try:
-                    combined = "[" + arg_str.replace("}{", "},{") + "]"
-                    arr = json.loads(combined)
-                    if isinstance(arr, list):
-                        # normalize each item
-                        for item in arr:
-                            tool_data_list.append(_normalize(item, tool_call))
-                        continue
-                except Exception:
-                    parsed = None
-
-                # As a last resort, try a safe eval (very limited)
-                try:
-                    parsed = eval(arg_str, {"__builtins__": {}}, {})
-                except Exception:
-                    parsed = None
-
-        # If parsed successfully as a dict
-        if isinstance(parsed, dict):
-            tool_data_list.append(_normalize(parsed, tool_call))
-        elif parsed is None:
-            # No usable arguments -> still produce an entry with fallbacks
-            tool_data_list.append(_normalize({}, tool_call))
+        for parsed in parsed_items:
+            tool_data_list.append(_normalize_call(parsed, tool_call))
 
     return tool_data_list
 

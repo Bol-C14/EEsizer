@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple
+from pathlib import Path
 
 import csv
 import json
@@ -21,14 +22,27 @@ class ToolCallingContext:
     netlist: str
     source_names: List[str]
     output_nodes: List[str]
+    output_dir: str
 
 
 @dataclass
 class ToolCallingConfig:
-    input_txt: str = config.OP_TXT_PATH
-    filtered_txt: str = config.VGS_FILTERED_PATH
-    output_csv: str = config.VGS_CSV_PATH
-    output_txt: str = config.VGS_OUTPUT_PATH
+    input_txt: str
+    filtered_txt: str
+    output_csv: str
+    output_txt: str
+    output_dir: str
+
+    @classmethod
+    def from_output_dir(cls, output_dir: str = config.RUN_OUTPUT_ROOT) -> "ToolCallingConfig":
+        base = Path(output_dir)
+        return cls(
+            input_txt=str(base / "op.txt"),
+            filtered_txt=str(base / "vgscheck.txt"),
+            output_csv=str(base / "vgscheck.csv"),
+            output_txt=str(base / "vgscheck_output.txt"),
+            output_dir=output_dir,
+        )
 
 
 @dataclass
@@ -67,10 +81,10 @@ class ToolChainRunner:
     def __init__(self, context: ToolCallingContext, deps: ToolCallingDeps, config: ToolCallingConfig | None = None):
         self.context = context
         self.deps = deps
-        self.config = config or ToolCallingConfig()
+        self.config = config or ToolCallingConfig.from_output_dir(context.output_dir)
 
     def _run_ngspice_with_vgscheck(self, sim_netlist: str) -> str:
-        ok = self.deps.run_ngspice(sim_netlist, "netlist")
+        ok = self.deps.run_ngspice(sim_netlist, "netlist", output_dir=self.context.output_dir)
         if ok:
             self.deps.filter_lines(self.config.input_txt, self.config.filtered_txt)
             if self.deps.convert_to_csv(self.config.filtered_txt, self.config.output_csv):
@@ -96,6 +110,7 @@ class ToolChainRunner:
         vgscheck = None
         cmrr_max = None
         sim_netlist = self.context.netlist
+        output_dir = self.context.output_dir
 
         source_names = _ensure_flat_str_list("context.source_names", self.context.source_names)
         output_nodes = _ensure_flat_str_list("context.output_nodes", self.context.output_nodes)
@@ -103,46 +118,46 @@ class ToolChainRunner:
         for tool_call in tool_chain["tool_calls"]:
             tool_name = tool_call["name"].lower()
             if tool_name == "dc_simulation":
-                sim_netlist = self.deps.dc_simulation(sim_netlist, source_names, output_nodes)
+                sim_netlist = self.deps.dc_simulation(sim_netlist, source_names, output_nodes, output_dir)
             elif tool_name == "ac_simulation":
-                sim_netlist = self.deps.ac_simulation(sim_netlist, source_names, output_nodes)
+                sim_netlist = self.deps.ac_simulation(sim_netlist, source_names, output_nodes, output_dir)
                 print(f"ac_netlist:{sim_netlist}")
             elif tool_name == "transient_simulation":
-                sim_netlist = self.deps.trans_simulation(sim_netlist, source_names, output_nodes)
+                sim_netlist = self.deps.trans_simulation(sim_netlist, source_names, output_nodes, output_dir)
             elif tool_name == "run_ngspice":
                 vgscheck = self._run_ngspice_with_vgscheck(sim_netlist)
             elif tool_name == "ac_gain":
-                gain = self.deps.ac_gain("output_ac")
+                gain = self.deps.ac_gain("output_ac", output_dir=output_dir)
                 print(f"ac_gain result: {gain}")
             elif tool_name == "output_swing":
-                ow = self.deps.out_swing("output_dc")
+                ow = self.deps.out_swing("output_dc", output_dir=output_dir)
                 print(f"output swing result: {ow}")
             elif tool_name == "icmr":
-                icmr = self.deps.ICMR("output_dc")
+                icmr = self.deps.ICMR("output_dc", output_dir=output_dir)
                 print(f"input common mode voltage result: {icmr}")
             elif tool_name == "offset":
-                Offset = self.deps.offset("output_dc")
+                Offset = self.deps.offset("output_dc", output_dir=output_dir)
                 print(f"input offset result: {Offset}")
             elif tool_name == "tran_gain":
-                tr_gain = self.deps.tran_gain("output_tran")
+                tr_gain = self.deps.tran_gain("output_tran", output_dir=output_dir)
                 print(f"tran_gain result: {tr_gain}")
             elif tool_name == "bandwidth":
-                bw = self.deps.bandwidth("output_ac")
+                bw = self.deps.bandwidth("output_ac", output_dir=output_dir)
                 print(f"bandwidth result: {bw}")
             elif tool_name == "unity_bandwidth":
-                ubw = self.deps.unity_bandwidth("output_ac")
+                ubw = self.deps.unity_bandwidth("output_ac", output_dir=output_dir)
                 print(f"unity bandwidth result: {ubw}")
             elif tool_name == "phase_margin":
-                pm = self.deps.phase_margin("output_ac")
+                pm = self.deps.phase_margin("output_ac", output_dir=output_dir)
                 print(f"phase margin: {pm}")
             elif tool_name == "cmrr_tran":
-                cmrr, cmrr_max = self.deps.cmrr_tran(sim_netlist)
+                cmrr, cmrr_max = self.deps.cmrr_tran(sim_netlist, output_dir=output_dir)
                 print(f"cmrr: {cmrr}, cmrr_max: {cmrr_max}")
             elif tool_name == "power":
-                pr = self.deps.stat_power("output_tran")
+                pr = self.deps.stat_power("output_tran", output_dir=output_dir)
                 print(f"power: {pr}")
             elif tool_name == "thd_input_range":
-                thd, ir = self.deps.thd_input_range("output_tran")
+                thd, ir = self.deps.thd_input_range("output_tran", output_dir=output_dir)
                 print(f"thd is {thd}")
 
         sim_output = (
@@ -191,6 +206,7 @@ class OptimizationContext:
     type_identified: str
     source_names: List[str]
     output_nodes: List[str]
+    output_dir: str
 
 
 @dataclass
@@ -204,6 +220,21 @@ class OptimizationConfig:
     filtered_txt: str = config.VGS_FILTERED_PATH
     output_csv: str = config.VGS_CSV_PATH
     output_txt: str = config.VGS_OUTPUT_PATH
+
+    @classmethod
+    def from_output_dir(cls, output_dir: str) -> "OptimizationConfig":
+        base = Path(output_dir)
+        return cls(
+            max_iterations=config.MAX_ITERATIONS,
+            tolerance=config.TOLERANCE,
+            output_dir=output_dir,
+            history_file=str(base / "result_history.txt"),
+            csv_file=str(base / "metrics.csv"),
+            input_txt=str(base / "op.txt"),
+            filtered_txt=str(base / "vgscheck.txt"),
+            output_csv=str(base / "vgscheck.csv"),
+            output_txt=str(base / "vgscheck_output.txt"),
+        )
 
 
 @dataclass
@@ -351,47 +382,48 @@ class OptimizationRunner:
 
         source_names = _ensure_flat_str_list("context.source_names", self.context.source_names)
         output_nodes = _ensure_flat_str_list("context.output_nodes", self.context.output_nodes)
+        output_dir = self.context.output_dir
 
         for tool_call in tools["tool_calls"]:
             tool_name = tool_call["name"].lower()
 
             if tool_name == "dc_simulation":
-                opti_netlist = self.deps.dc_simulation(opti_netlist, source_names, output_nodes)
+                opti_netlist = self.deps.dc_simulation(opti_netlist, source_names, output_nodes, output_dir)
             elif tool_name == "ac_simulation":
-                opti_netlist = self.deps.ac_simulation(opti_netlist, source_names, output_nodes)
+                opti_netlist = self.deps.ac_simulation(opti_netlist, source_names, output_nodes, output_dir)
             elif tool_name == "transient_simulation":
-                opti_netlist = self.deps.trans_simulation(opti_netlist, source_names, output_nodes)
+                opti_netlist = self.deps.trans_simulation(opti_netlist, source_names, output_nodes, output_dir)
             elif tool_name == "run_ngspice":
-                self.deps.run_ngspice(opti_netlist, "netlist")
+                self.deps.run_ngspice(opti_netlist, "netlist", output_dir=output_dir)
                 print("running ngspice")
                 self.deps.filter_lines(self.config.input_txt, self.config.filtered_txt)
                 self.deps.convert_to_csv(self.config.filtered_txt, self.config.output_csv)
                 self.deps.format_csv_to_key_value(self.config.output_csv, self.config.output_txt)
                 vgscheck = self.deps.read_txt_as_string(self.config.output_txt)
             elif tool_name == "ac_gain":
-                gain_output = self.deps.ac_gain("output_ac")
+                gain_output = self.deps.ac_gain("output_ac", output_dir=output_dir)
             elif tool_name == "dc_gain":
-                dc_gain_output = self.deps.dc_gain("output_dc")
+                dc_gain_output = self.deps.dc_gain("output_dc", output_dir=output_dir)
             elif tool_name == "output_swing":
-                ow_output = self.deps.out_swing("output_dc")
+                ow_output = self.deps.out_swing("output_dc", output_dir=output_dir)
             elif tool_name == "offset":
-                offset_output = self.deps.offset("output_dc")
+                offset_output = self.deps.offset("output_dc", output_dir=output_dir)
             elif tool_name == "icmr":
-                icmr_output = self.deps.ICMR("output_dc")
+                icmr_output = self.deps.ICMR("output_dc", output_dir=output_dir)
             elif tool_name == "tran_gain":
-                tr_gain_output = self.deps.tran_gain("output_tran")
+                tr_gain_output = self.deps.tran_gain("output_tran", output_dir=output_dir)
             elif tool_name == "bandwidth":
-                bw_output = self.deps.bandwidth("output_ac")
+                bw_output = self.deps.bandwidth("output_ac", output_dir=output_dir)
             elif tool_name == "unity_bandwidth":
-                ubw_output = self.deps.unity_bandwidth("output_ac")
+                ubw_output = self.deps.unity_bandwidth("output_ac", output_dir=output_dir)
             elif tool_name == "phase_margin":
-                pm_output = self.deps.phase_margin("output_ac")
+                pm_output = self.deps.phase_margin("output_ac", output_dir=output_dir)
             elif tool_name == "power":
-                pr_output = self.deps.stat_power("output_tran")
+                pr_output = self.deps.stat_power("output_tran", output_dir=output_dir)
             elif tool_name == "thd_input_range":
-                thd_output, _ir_output = self.deps.thd_input_range("output_tran")
+                thd_output, _ir_output = self.deps.thd_input_range("output_tran", output_dir=output_dir)
             elif tool_name == "cmrr_tran":
-                cmrr_output, cmrr_max = self.deps.cmrr_tran(opti_netlist)
+                cmrr_output, cmrr_max = self.deps.cmrr_tran(opti_netlist, output_dir=output_dir)
 
         metrics = {
             "gain_output": gain_output,
