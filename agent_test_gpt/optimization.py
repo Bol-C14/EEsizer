@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple
 from pathlib import Path
+import time
 
 import csv
 import json
@@ -91,7 +92,7 @@ class ToolChainRunner:
                 self.deps.format_csv_to_key_value(self.config.output_csv, self.config.output_txt)
                 return self.deps.read_txt_as_string(self.config.output_txt)
             return "Vgs/Vth check not available (no parsed devices)."
-        return "NGspice run failed; Vgs/Vth check not available."
+        raise RuntimeError("NGspice run failed; halting tool chain.")
 
     def run(self, tool_chain: Dict) -> ToolCallingResult:
         gain = None
@@ -220,6 +221,7 @@ class OptimizationConfig:
     filtered_txt: str = config.VGS_FILTERED_PATH
     output_csv: str = config.VGS_CSV_PATH
     output_txt: str = config.VGS_OUTPUT_PATH
+    llm_delay_seconds: float = 0.0
 
     @classmethod
     def from_output_dir(cls, output_dir: str) -> "OptimizationConfig":
@@ -234,6 +236,7 @@ class OptimizationConfig:
             filtered_txt=str(base / "vgscheck.txt"),
             output_csv=str(base / "vgscheck.csv"),
             output_txt=str(base / "vgscheck_output.txt"),
+            llm_delay_seconds=0.0,
         )
 
 
@@ -344,12 +347,14 @@ class OptimizationRunner:
         analysising_prompt = prompts.build_analysis_prompt(previous_results, self.context.sizing_question)
         analysis = self.deps.make_chat_completion_request(analysising_prompt)
         print(analysis)
-        time.sleep(10)
+        if self.config.llm_delay_seconds:
+            time.sleep(self.config.llm_delay_seconds)
 
         optimising_prompt = prompts.build_optimising_prompt(self.context.type_identified, analysis, previous_results)
         optimising = self.deps.make_chat_completion_request(optimising_prompt)
         print(optimising)
-        time.sleep(10)
+        if self.config.llm_delay_seconds:
+            time.sleep(self.config.llm_delay_seconds)
 
         sizing_prompt = prompts.build_sizing_prompt(sizing_question, opti_netlist, optimising)
         modified = self.deps.make_chat_completion_request(sizing_prompt)
@@ -394,8 +399,10 @@ class OptimizationRunner:
             elif tool_name == "transient_simulation":
                 opti_netlist = self.deps.trans_simulation(opti_netlist, source_names, output_nodes, output_dir)
             elif tool_name == "run_ngspice":
-                self.deps.run_ngspice(opti_netlist, "netlist", output_dir=output_dir)
+                ok = self.deps.run_ngspice(opti_netlist, "netlist", output_dir=output_dir)
                 print("running ngspice")
+                if not ok:
+                    raise RuntimeError("NGspice run failed during optimization")
                 self.deps.filter_lines(self.config.input_txt, self.config.filtered_txt)
                 self.deps.convert_to_csv(self.config.filtered_txt, self.config.output_csv)
                 self.deps.format_csv_to_key_value(self.config.output_csv, self.config.output_txt)
@@ -567,7 +574,6 @@ class OptimizationRunner:
         sizing_Question = f"Currently, {self.context.sim_output}. " + self.context.sizing_question
 
         while iteration < max_iterations and not converged:
-            time.sleep(20)
             with open(self.config.history_file, "r") as f:
                 previous_results = f.read()
             print(f"----------------------iter = {iteration}-----------------------------")
