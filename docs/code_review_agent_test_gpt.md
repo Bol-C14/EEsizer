@@ -45,6 +45,15 @@ Scope: current `agent_test_gpt` package after the initial refactors (LLM prompts
 
 - Reproducibility gaps: runs depend on ambient cwd, existing `output` contents, environment variables for ngspice, and whatever the LLM returns. There is no seed/control for randomness or snapshotting of prompts/responses beyond ad-hoc prints.
 
+
+- PARTIALLY MITIGATED - That one is only partially addressed. We’ve improved traceability (per-run directories, manifests with model/temperature/cwd, structured logging), but true reproducibility is still limited by:
+LLM nondeterminism (temperature/sampling, model version drift).
+External tool versions (ngspice binary, PDK files) and environment variables.
+Inputs not snapshotted (prompts/responses, generated tool chains) and no deterministic seeding.
+If strict reproducibility is required, we’d need to: pin/capture LLM model/temperature and seed (if the provider supports it), record prompts/responses/tool chains per run, pin ngspice version and resource hashes, and fail if required env inputs are missing. Let me know if you want me to add those safeguards.
+
+
+
 - NOT YET PLANED, NEED TO BE DISCUSSED, DO-NOT MITIGATE THIS YET: Numerical correctness issues: `cmrr_tran` uses natural log instead of log10 for dB (`agent_test_gpt/simulation_utils.py:533-548`), `stat_power` indexes column 3 even when only 3 columns exist (`agent_test_gpt/simulation_utils.py:466-482`), and several AC helpers take `log10` of complex arrays, relying on numpy coercion/warnings rather than explicit magnitude (`agent_test_gpt/simulation_utils.py:356-417`).
 
 ## Minor / Style
