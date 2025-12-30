@@ -32,11 +32,18 @@ Scope: current `agent_test_gpt` package after the initial refactors (LLM prompts
 
 ## Moderate
 - Tight coupling to specific LLM models and settings: model names and temperatures are hard-coded (`agent_test_gpt/llm_client.py:33-47`, `127-136`), with no API key wiring or retry/backoff. This hinders provider changes and observability.
+- Mitigation: LLM client now reads model/temperature from environment variables (DEFAULT_MODEL/DEFAULT_FUNCTION_MODEL/DEFAULT_TEMPERATURE) with structured logging; errors raise instead of returning None.
+
 - Sleep-based pacing instead of structured retries: fixed `time.sleep(10/20)` calls gate every loop (`agent_test_gpt/optimization.py:312-326`, `521-533`), hurting throughput and leaving no adaptive backoff on failure.
+- Mitigation: optimization loop supports configurable retry with exponential backoff via `max_retries` and `retry_backoff_seconds`, and delay is optional (`llm_delay_seconds`).
+
 - Metric and tool naming drift: simulation/analysis naming is hand-built and partially inferred (`agent_test_gpt/toolchain.py:86-205`), making it easy for LLM responses to fall out of sync with actual tool implementations.
+
 - Reporting assumes CSVs exist and are well-formed: `plot_optimization_history` reads CSV without guardrails and uses derived columns directly (`agent_test_gpt/reporting.py:52-92`), so missing files or malformed data will crash plotting.
+
 - Reproducibility gaps: runs depend on ambient cwd, existing `output` contents, environment variables for ngspice, and whatever the LLM returns. There is no seed/control for randomness or snapshotting of prompts/responses beyond ad-hoc prints.
-- Numerical correctness issues: `cmrr_tran` uses natural log instead of log10 for dB (`agent_test_gpt/simulation_utils.py:533-548`), `stat_power` indexes column 3 even when only 3 columns exist (`agent_test_gpt/simulation_utils.py:466-482`), and several AC helpers take `log10` of complex arrays, relying on numpy coercion/warnings rather than explicit magnitude (`agent_test_gpt/simulation_utils.py:356-417`).
+
+- NOT YET PLANED, NEED TO BE DISCUSSED, DO-NOT MITIGATE THIS YET: Numerical correctness issues: `cmrr_tran` uses natural log instead of log10 for dB (`agent_test_gpt/simulation_utils.py:533-548`), `stat_power` indexes column 3 even when only 3 columns exist (`agent_test_gpt/simulation_utils.py:466-482`), and several AC helpers take `log10` of complex arrays, relying on numpy coercion/warnings rather than explicit magnitude (`agent_test_gpt/simulation_utils.py:356-417`).
 
 ## Minor / Style
 - Mixed casing and unused variables: duplicated `import os` (`agent_test_gpt/agent_gpt_openai.py:3` and 59), placeholder `_missing_dc_gain` injected instead of a real metric (`agent_test_gpt/agent_gpt_openai.py:336-347`), and unused `type_question` defaults (`agent_test_gpt/agent_gpt_openai.py:156-224`).

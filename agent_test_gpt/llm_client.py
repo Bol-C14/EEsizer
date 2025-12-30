@@ -3,8 +3,13 @@
 from openai import OpenAI
 
 from agent_test_gpt.logging_utils import get_logger
+import os
 
 _logger = get_logger(__name__)
+
+DEFAULT_MODEL = os.getenv("LLM_MODEL", "gpt-5.2")
+DEFAULT_FUNCTION_MODEL = os.getenv("LLM_FUNCTION_MODEL", "gpt-5.2")
+DEFAULT_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.4"))
 
 
 """
@@ -36,15 +41,9 @@ def make_chat_completion_request(prompt):
     _logger.info("Making ChatCompletion request with streaming enabled...")
     try:
         response = client.chat.completions.create(
-            # model="anthropic.claude-3-haiku-20240307-v1:0",
-            # model="gpt-4o-mini",
-            #model="gemini-2.0-flash-001",
-            # model="gpt-4.1",
-            model="o3-2025-04-16",
-            #model= "gpt-oss-120b",
-            #reasoning={"effort": "medium"},
+            model=DEFAULT_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=1,
+            temperature=DEFAULT_TEMPERATURE,
             stream=True,
             max_completion_tokens=20000,
         )
@@ -130,10 +129,9 @@ def make_chat_completion_request_function(prompt):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4.1",
-            #model="o3-2025-04-16",
+            model=DEFAULT_FUNCTION_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=1,
+            temperature=DEFAULT_TEMPERATURE,
             stream=False,
             tools=tools,
             tool_choice="required"

@@ -32,18 +32,15 @@ class TestNodeAndCodeExtractors(unittest.TestCase):
         self.assertEqual(source_names, ["Vid"])
 
     def test_nodes_extract_new_schema(self):
-        payload = '{"nodes": [{"input_nodes": ["in1", "in2"]}, {"source_names": ["Vid", "Vcm"]}]}'
+        payload = '{"nodes": [{"input_nodes": ["in1", "in2"], "output_nodes": ["out"], "source_names": ["Vid", "Vcm"]}]}'
         input_nodes, output_nodes, source_names = netlist_utils.nodes_extract(payload)
         self.assertEqual(input_nodes, ["in1", "in2"])
-        self.assertEqual(output_nodes, [])
+        self.assertEqual(output_nodes, ["out"])
         self.assertEqual(source_names, ["Vid", "Vcm"])
 
     def test_nodes_extract_invalid_json(self):
-        with contextlib.redirect_stdout(io.StringIO()):
-            input_nodes, output_nodes, source_names = netlist_utils.nodes_extract("not json")
-        self.assertEqual(input_nodes, [])
-        self.assertEqual(output_nodes, [])
-        self.assertEqual(source_names, [])
+        with self.assertRaises(Exception):
+            netlist_utils.nodes_extract("not json")
 
     def test_extract_code_blocks(self):
         text = "Intro '''line1\nline2\n''' middle ```line3\nline4``` tail"
@@ -168,7 +165,6 @@ class TestToolFormatting(unittest.TestCase):
         chain = {
             "tool_calls": [
                 {"name": "ac_simulation"},
-                {"name": "run_ngspice"},
                 {"name": "ac_gain"},
             ]
         }
@@ -179,8 +175,8 @@ class TestToolFormatting(unittest.TestCase):
         with self.assertRaises(ValueError):
             toolchain.validate_tool_chain(chain)
 
-    def test_validate_tool_chain_analysis_before_run(self):
-        chain = {"tool_calls": [{"name": "ac_gain"}, {"name": "run_ngspice"}]}
+    def test_validate_tool_chain_analysis_before_sim(self):
+        chain = {"tool_calls": [{"name": "ac_gain"}, {"name": "ac_simulation"}]}
         with self.assertRaises(ValueError):
             toolchain.validate_tool_chain(chain)
 

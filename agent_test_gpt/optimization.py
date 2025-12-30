@@ -85,6 +85,7 @@ class ToolChainRunner:
         self.context = context
         self.deps = deps
         self.config = config or ToolCallingConfig.from_output_dir(context.output_dir)
+        self.logger = logging.getLogger(__name__)
 
     def _run_ngspice_with_vgscheck(self, sim_netlist: str) -> str:
         ok = self.deps.run_ngspice(sim_netlist, "netlist", output_dir=self.context.output_dir)
@@ -113,23 +114,37 @@ class ToolChainRunner:
         icmr = None
         vgscheck = None
         cmrr_max = None
-        sim_netlist = self.context.netlist
+        base_netlist = self.context.netlist
+        sim_netlist = base_netlist
         output_dir = self.context.output_dir
 
         source_names = _ensure_flat_str_list("context.source_names", self.context.source_names)
         output_nodes = _ensure_flat_str_list("context.output_nodes", self.context.output_nodes)
+        if not output_nodes:
+            raise ValueError("output_nodes is empty; cannot build wrdata commands for simulations")
 
         for tool_call in tool_chain["tool_calls"]:
             tool_name = tool_call["name"].lower()
             if tool_name == "dc_simulation":
-                sim_netlist = self.deps.dc_simulation(sim_netlist, source_names, output_nodes, output_dir)
+                dc_netlist = self.deps.dc_simulation(base_netlist, source_names, output_nodes, output_dir)
+                if not self.deps.run_ngspice(dc_netlist, "netlist", output_dir=output_dir):
+                    raise RuntimeError("dc_simulation NGspice run failed")
+                _assert_data_file(output_dir, "output_dc.dat")
+                sim_netlist = dc_netlist
             elif tool_name == "ac_simulation":
-                sim_netlist = self.deps.ac_simulation(sim_netlist, source_names, output_nodes, output_dir)
-                print(f"ac_netlist:{sim_netlist}")
+                ac_netlist = self.deps.ac_simulation(base_netlist, source_names, output_nodes, output_dir)
+                if not self.deps.run_ngspice(ac_netlist, "netlist", output_dir=output_dir):
+                    raise RuntimeError("ac_simulation NGspice run failed")
+                _assert_data_file(output_dir, "output_ac.dat")
+                sim_netlist = ac_netlist
             elif tool_name == "transient_simulation":
-                sim_netlist = self.deps.trans_simulation(sim_netlist, source_names, output_nodes, output_dir)
+                tran_netlist = self.deps.trans_simulation(base_netlist, source_names, output_nodes, output_dir)
+                if not self.deps.run_ngspice(tran_netlist, "netlist", output_dir=output_dir):
+                    raise RuntimeError("transient_simulation NGspice run failed")
+                _assert_data_file(output_dir, "output_tran.dat")
+                sim_netlist = tran_netlist
             elif tool_name == "run_ngspice":
-                vgscheck = self._run_ngspice_with_vgscheck(sim_netlist)
+                self.logger.info("Skipping standalone run_ngspice; simulations are executed per type")
             elif tool_name == "ac_gain":
                 gain = self.deps.ac_gain("output_ac", output_dir=output_dir)
                 print(f"ac_gain result: {gain}")
@@ -163,6 +178,15 @@ class ToolChainRunner:
             elif tool_name == "thd_input_range":
                 thd, ir = self.deps.thd_input_range("output_tran", output_dir=output_dir)
                 print(f"thd is {thd}")
+
+        if vgscheck is None:
+            try:
+                self.deps.filter_lines(self.config.input_txt, self.config.filtered_txt)
+                if self.deps.convert_to_csv(self.config.filtered_txt, self.config.output_csv):
+                    self.deps.format_csv_to_key_value(self.config.output_csv, self.config.output_txt)
+                    vgscheck = self.deps.read_txt_as_string(self.config.output_txt)
+            except Exception:
+                vgscheck = None
 
         sim_output = (
             f"Transistors below vth: {vgscheck},"
@@ -225,6 +249,8 @@ class OptimizationConfig:
     output_csv: str = config.VGS_CSV_PATH
     output_txt: str = config.VGS_OUTPUT_PATH
     llm_delay_seconds: float = 0.0
+    max_retries: int = 3
+    retry_backoff_seconds: float = 2.0
 
     @classmethod
     def from_output_dir(cls, output_dir: str) -> "OptimizationConfig":
@@ -240,6 +266,8 @@ class OptimizationConfig:
             output_csv=str(base / "vgscheck.csv"),
             output_txt=str(base / "vgscheck_output.txt"),
             llm_delay_seconds=0.0,
+            max_retries=3,
+            retry_backoff_seconds=2.0,
         )
 
 
@@ -333,6 +361,12 @@ def _write_history(path: str, items: List[str]) -> None:
         f.write(str(items))
 
 
+def _assert_data_file(output_dir: str, filename: str) -> None:
+    path = Path(output_dir) / filename
+    if not path.exists() or path.stat().st_size == 0:
+        raise RuntimeError(f"Required simulation data missing or empty: {path}")
+
+
 class OptimizationRunner:
     def __init__(self, context: OptimizationContext, deps: OptimizationDeps, config: OptimizationConfig | None = None):
         self.context = context
@@ -348,22 +382,38 @@ class OptimizationRunner:
         _write_history(self.config.history_file, previous_results)
         return previous_results_list
 
+    def _call_with_retry(self, fn: Callable[[], str], stage: str) -> str:
+        attempts = 0
+        delay = self.config.retry_backoff_seconds
+        last_exc = None
+        while attempts < self.config.max_retries:
+            try:
+                return fn()
+            except Exception as exc:
+                last_exc = exc
+                attempts += 1
+                self.logger.warning("%s failed (attempt %s/%s): %s", stage, attempts, self.config.max_retries, exc)
+                time.sleep(delay)
+                delay *= 2
+        self.logger.error("%s failed after %s attempts", stage, self.config.max_retries)
+        raise last_exc
+
     def _run_llm_cycle(self, previous_results: str, sizing_question: str, opti_netlist: str) -> str:
         analysising_prompt = prompts.build_analysis_prompt(previous_results, self.context.sizing_question)
-        analysis = self.deps.make_chat_completion_request(analysising_prompt)
-        print(analysis)
+        analysis = self._call_with_retry(lambda: self.deps.make_chat_completion_request(analysising_prompt), "analysis")
+        self.logger.info("Analysis response received.")
         if self.config.llm_delay_seconds:
             time.sleep(self.config.llm_delay_seconds)
 
         optimising_prompt = prompts.build_optimising_prompt(self.context.type_identified, analysis, previous_results)
-        optimising = self.deps.make_chat_completion_request(optimising_prompt)
-        print(optimising)
+        optimising = self._call_with_retry(lambda: self.deps.make_chat_completion_request(optimising_prompt), "optimising")
+        self.logger.info("Optimising response received.")
         if self.config.llm_delay_seconds:
             time.sleep(self.config.llm_delay_seconds)
 
         sizing_prompt = prompts.build_sizing_prompt(sizing_question, opti_netlist, optimising)
-        modified = self.deps.make_chat_completion_request(sizing_prompt)
-        print(modified)
+        modified = self._call_with_retry(lambda: self.deps.make_chat_completion_request(sizing_prompt), "sizing")
+        self.logger.info("Sizing response received.")
         return modified
 
     def _run_tool_calls(self, tools: Dict, modified_output: str) -> Tuple[Dict, str, str, float | None]:
@@ -392,26 +442,34 @@ class OptimizationRunner:
 
         source_names = _ensure_flat_str_list("context.source_names", self.context.source_names)
         output_nodes = _ensure_flat_str_list("context.output_nodes", self.context.output_nodes)
+        if not output_nodes:
+            raise ValueError("output_nodes is empty; cannot build wrdata commands for simulations")
         output_dir = self.context.output_dir
+        base_netlist = opti_netlist
 
         for tool_call in tools["tool_calls"]:
             tool_name = tool_call["name"].lower()
 
             if tool_name == "dc_simulation":
-                opti_netlist = self.deps.dc_simulation(opti_netlist, source_names, output_nodes, output_dir)
+                dc_netlist = self.deps.dc_simulation(base_netlist, source_names, output_nodes, output_dir)
+                if not self.deps.run_ngspice(dc_netlist, "netlist", output_dir=output_dir):
+                    raise RuntimeError("dc_simulation NGspice run failed during optimization")
+                _assert_data_file(output_dir, "output_dc.dat")
+                opti_netlist = dc_netlist
             elif tool_name == "ac_simulation":
-                opti_netlist = self.deps.ac_simulation(opti_netlist, source_names, output_nodes, output_dir)
+                ac_netlist = self.deps.ac_simulation(base_netlist, source_names, output_nodes, output_dir)
+                if not self.deps.run_ngspice(ac_netlist, "netlist", output_dir=output_dir):
+                    raise RuntimeError("ac_simulation NGspice run failed during optimization")
+                _assert_data_file(output_dir, "output_ac.dat")
+                opti_netlist = ac_netlist
             elif tool_name == "transient_simulation":
-                opti_netlist = self.deps.trans_simulation(opti_netlist, source_names, output_nodes, output_dir)
+                tran_netlist = self.deps.trans_simulation(base_netlist, source_names, output_nodes, output_dir)
+                if not self.deps.run_ngspice(tran_netlist, "netlist", output_dir=output_dir):
+                    raise RuntimeError("transient_simulation NGspice run failed during optimization")
+                _assert_data_file(output_dir, "output_tran.dat")
+                opti_netlist = tran_netlist
             elif tool_name == "run_ngspice":
-                ok = self.deps.run_ngspice(opti_netlist, "netlist", output_dir=output_dir)
-                print("running ngspice")
-                if not ok:
-                    raise RuntimeError("NGspice run failed during optimization")
-                self.deps.filter_lines(self.config.input_txt, self.config.filtered_txt)
-                self.deps.convert_to_csv(self.config.filtered_txt, self.config.output_csv)
-                self.deps.format_csv_to_key_value(self.config.output_csv, self.config.output_txt)
-                vgscheck = self.deps.read_txt_as_string(self.config.output_txt)
+                self.logger.info("Skipping standalone run_ngspice; simulations are executed per type")
             elif tool_name == "ac_gain":
                 gain_output = self.deps.ac_gain("output_ac", output_dir=output_dir)
             elif tool_name == "dc_gain":
@@ -436,6 +494,15 @@ class OptimizationRunner:
                 thd_output, _ir_output = self.deps.thd_input_range("output_tran", output_dir=output_dir)
             elif tool_name == "cmrr_tran":
                 cmrr_output, cmrr_max = self.deps.cmrr_tran(opti_netlist, output_dir=output_dir)
+
+        if vgscheck is None:
+            try:
+                self.deps.filter_lines(self.config.input_txt, self.config.filtered_txt)
+                self.deps.convert_to_csv(self.config.filtered_txt, self.config.output_csv)
+                self.deps.format_csv_to_key_value(self.config.output_csv, self.config.output_txt)
+                vgscheck = self.deps.read_txt_as_string(self.config.output_txt)
+            except Exception:
+                vgscheck = None
 
         metrics = {
             "gain_output": gain_output,
@@ -470,27 +537,27 @@ class OptimizationRunner:
     def _update_pass_flags(self, targets: Dict[str, float | None], metrics: Dict[str, float | None], passes: Dict[str, bool]) -> None:
         tol = self.config.tolerance
 
-        if targets["gain_target"] is not None:
+        if targets["gain_target"] is not None and metrics["gain_output"] is not None:
             passes["gain_pass"] = metrics["gain_output"] >= targets["gain_target"] - targets["gain_target"] * tol
-        if targets["tr_gain_target"] is not None:
+        if targets["tr_gain_target"] is not None and metrics["tr_gain_output"] is not None:
             passes["tr_gain_pass"] = metrics["tr_gain_output"] >= targets["tr_gain_target"] - targets["tr_gain_target"] * tol
-        if targets["output_swing_target"] is not None:
+        if targets["output_swing_target"] is not None and metrics["ow_output"] is not None:
             passes["ow_pass"] = metrics["ow_output"] >= targets["output_swing_target"] - targets["output_swing_target"] * tol
-        if targets["input_offset_target"] is not None:
+        if targets["input_offset_target"] is not None and metrics["offset_output"] is not None:
             passes["input_offset_pass"] = metrics["offset_output"] <= targets["input_offset_target"] - targets["input_offset_target"] * tol
-        if targets["icmr_target"] is not None:
+        if targets["icmr_target"] is not None and metrics["icmr_output"] is not None:
             passes["icmr_pass"] = metrics["icmr_output"] >= targets["icmr_target"] - targets["icmr_target"] * tol
-        if targets["bandwidth_target"] is not None:
+        if targets["bandwidth_target"] is not None and metrics["bw_output"] is not None:
             passes["bw_pass"] = metrics["bw_output"] >= targets["bandwidth_target"] - targets["bandwidth_target"] * tol
-        if targets["unity_bandwidth_target"] is not None:
+        if targets["unity_bandwidth_target"] is not None and metrics["ubw_output"] is not None:
             passes["ubw_pass"] = metrics["ubw_output"] >= targets["unity_bandwidth_target"] - targets["unity_bandwidth_target"] * tol
-        if targets["phase_margin_target"] is not None:
+        if targets["phase_margin_target"] is not None and metrics["pm_output"] is not None:
             passes["pm_pass"] = metrics["pm_output"] >= targets["phase_margin_target"] - targets["phase_margin_target"] * tol
-        if targets["pr_target"] is not None:
+        if targets["pr_target"] is not None and metrics["pr_output"] is not None:
             passes["pr_pass"] = metrics["pr_output"] <= targets["pr_target"] + targets["pr_target"] * tol
-        if targets["cmrr_target"] is not None:
+        if targets["cmrr_target"] is not None and metrics["cmrr_output"] is not None:
             passes["cmrr_pass"] = metrics["cmrr_output"] >= targets["cmrr_target"] - targets["cmrr_target"] * tol
-        if targets["thd_target"] is not None:
+        if targets["thd_target"] is not None and metrics["thd_output"] is not None:
             passes["thd_pass"] = metrics["thd_output"] <= targets["thd_target"] + np.abs(targets["thd_target"]) * tol
 
     def _write_csv_results(self, initial_metrics: Dict[str, float | None], lists: Dict[str, List]) -> None:

@@ -5,6 +5,10 @@ import re
 from pathlib import Path
 
 from agent_test_gpt import config
+from agent_test_gpt.logging_utils import get_logger
+
+
+_logger = get_logger(__name__)
 
 
 _INCLUDE_PATTERN = re.compile(r"^\s*\.include\s+['\"]?(?P<path>[^'\"\s]+)['\"]?", re.IGNORECASE | re.MULTILINE)
@@ -103,52 +107,81 @@ def sanitize_netlist(netlist_text: str, max_lines: int = 20000) -> str:
 
 
 def nodes_extract(node):
+    """Parse node JSON into flat lists; raise if required fields are missing."""
+
+    def _as_list(value):
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple)):
+            return [str(v) for v in value if str(v).strip()]
+        return [str(value)] if str(value).strip() else []
+
     try:
-        # Step 1: Clean the input string (remove backticks, "json", and extra whitespace)
-        nodes = node.strip().strip('`')  # Remove leading/trailing backticks and whitespace
-        nodes = nodes.replace("json", "").strip()  # Remove the word "json" and any extra whitespace
+        cleaned = node.strip().strip('`').replace("json", "").strip()
+        payload = json.loads(cleaned)
+    except Exception as exc:  # includes JSONDecodeError and others
+        _logger.error("Failed to parse node JSON: %s", exc)
+        raise
 
-        # Step 2: Parse the JSON string into a dictionary
-        node_name = json.loads(nodes)  # Use json.loads() for parsing strings
+    input_nodes: list[str] = []
+    output_nodes: list[str] = []
+    source_names: list[str] = []
 
-        # Step 3: Initialize lists to store input nodes, output nodes, and source names
-        input_nodes = []
-        output_nodes = []
-        source_names = []
+    # Allow top-level dict fields as well as a "nodes" list of dicts
+    candidate_items = []
+    if isinstance(payload, dict):
+        candidate_items.extend(payload.get("nodes", []))
+        candidate_items.append(payload)
+    elif isinstance(payload, list):
+        candidate_items.extend(payload)
+    else:
+        _logger.error("Unexpected nodes payload type: %s", type(payload).__name__)
+        raise ValueError(f"Unexpected nodes payload type: {type(payload).__name__}")
 
-        # Step 4: Iterate through the "nodes" list (support multiple schema variants)
-        for node_item in node_name.get("nodes", []):
-            if not isinstance(node_item, dict):
-                continue
+    for item in candidate_items:
+        if not isinstance(item, dict):
+            continue
+        # normalize keys to lower for matching
+        lower_keys = {k.lower(): v for k, v in item.items()}
 
-            # Legacy format: {"input_node": "in1"}, {"source_name": "Vid"}
-            if "input_node" in node_item:
-                input_nodes.append(node_item["input_node"])
-                continue
-            if "output_node" in node_item:
-                output_nodes.append(node_item["output_node"])
-                continue
-            if "source_name" in node_item:
-                source_names.append(node_item["source_name"])
-                continue
+        input_nodes.extend(_as_list(lower_keys.get("input_node")))
+        input_nodes.extend(_as_list(lower_keys.get("input_nodes")))
 
-            # Newer format: {"input_nodes": [..]}, {"source_names": [..]}
-            if "input_nodes" in node_item and isinstance(node_item["input_nodes"], list):
-                input_nodes.extend([str(x) for x in node_item["input_nodes"]])
-                continue
-            if "source_names" in node_item and isinstance(node_item["source_names"], list):
-                source_names.extend([str(x) for x in node_item["source_names"]])
-                continue
+        output_nodes.extend(_as_list(lower_keys.get("output_node")))
+        output_nodes.extend(_as_list(lower_keys.get("output_nodes")))
 
-        # Step 5: Return the extracted lists
-        return input_nodes, output_nodes, source_names
+        # accept various source key names
+        source_names.extend(_as_list(lower_keys.get("source_name")))
+        source_names.extend(_as_list(lower_keys.get("source_names")))
+        source_names.extend(_as_list(lower_keys.get("ac_source_name")))
+        source_names.extend(_as_list(lower_keys.get("ac_source_names")))
+        source_names.extend(_as_list(lower_keys.get("tran_source_name")))
+        source_names.extend(_as_list(lower_keys.get("tran_source_names")))
+        source_names.extend(_as_list(lower_keys.get("supply_source_name")))
+        source_names.extend(_as_list(lower_keys.get("supply_source_names")))
 
-    except json.JSONDecodeError as e:
-        print("Error parsing JSON:", e)
-        return [], [], []
-    except KeyError as e:
-        print(f"Missing key in JSON: {e}")
-        return [], [], []
+    # Deduplicate while preserving order
+    def _dedup(seq: list[str]) -> list[str]:
+        seen = set()
+        result = []
+        for val in seq:
+            if val not in seen:
+                seen.add(val)
+                result.append(val)
+        return result
+
+    input_nodes = _dedup(input_nodes)
+    output_nodes = _dedup(output_nodes)
+    source_names = _dedup(source_names)
+
+    if not output_nodes:
+        _logger.error("Node extraction produced no output nodes. Raw: %s", node)
+        raise ValueError("output_nodes is empty after parsing node response")
+    if not source_names:
+        _logger.error("Node extraction produced no source names. Raw: %s", node)
+        raise ValueError("source_names is empty after parsing node response")
+
+    return input_nodes, output_nodes, source_names
 
 
 def extract_code(text):
