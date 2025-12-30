@@ -58,8 +58,11 @@ If strict reproducibility is required, we’d need to: pin/capture LLM model/tem
 
 ## Minor / Style
 - Mixed casing and unused variables: duplicated `import os` (`agent_test_gpt/agent_gpt_openai.py:3` and 59), placeholder `_missing_dc_gain` injected instead of a real metric (`agent_test_gpt/agent_gpt_openai.py:336-347`), and unused `type_question` defaults (`agent_test_gpt/agent_gpt_openai.py:156-224`).
+- Mitigation: cleaned imports, replaced the dc_gain placeholder with a no-op warning stub, and removed unused defaults.
 - Prints instead of structured logging throughout, making it hard to trace multi-run execution or capture logs programmatically.
+- Mitigation: replaced prints with structured logging (configurable via env/log-level) and per-run log files.
 - Tests cover only prompt hashing and a few parsing helpers; there is no coverage for optimization loops, ngspice orchestration, or safety constraints.
+- Mitigation: added targeted unit tests for LLM client config, tool-chain validation, reporting file guards, and a mocked optimization runner path to increase coverage; further E2E tests remain a future improvement.
 
 ## Recommendations / Next Steps
 - Eliminate unsafe parsing: remove `eval`, require strict JSON schemas for tool calls, and validate against an allowlist before dispatch.

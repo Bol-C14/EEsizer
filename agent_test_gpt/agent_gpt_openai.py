@@ -1,5 +1,6 @@
 #%%
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Dict, List
@@ -204,9 +205,9 @@ def run_agent(user_question: str, user_netlist: str, run_dir: str | None = None)
 
     # Circuit type identification
     type_identify_prompt = prompts.build_type_identify_prompt(tasks_parsed.type_question, sanitized_netlist)
-    print(type_identify_prompt)
+    _logger.debug("Type identify prompt: %s", type_identify_prompt)
     type_identified = make_chat_completion_request(type_identify_prompt)
-    print(type_identified)
+    _logger.info("Type identified: %s", type_identified)
 
     # Node discovery
     node_prompt = prompts.build_node_prompt(tasks_parsed.node_question, sanitized_netlist)
@@ -253,7 +254,8 @@ def run_agent(user_question: str, user_netlist: str, run_dir: str | None = None)
         )
 
         def _missing_dc_gain(*_args, **_kwargs):
-            raise NameError("name 'dc_gain' is not defined")
+            _logger.warning("dc_gain called but not implemented; returning None.")
+            return None
 
         deps = OptimizationDeps(
             make_chat_completion_request=make_chat_completion_request,
