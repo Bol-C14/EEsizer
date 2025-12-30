@@ -16,6 +16,7 @@ from agent_test_gpt import prompts
 from agent_test_gpt import config
 from agent_test_gpt.simulation_utils import _ensure_flat_str_list
 from agent_test_gpt.models import TargetValues
+from agent_test_gpt.toolchain import validate_tool_chain
 
 
 @dataclass
@@ -95,6 +96,7 @@ class ToolChainRunner:
         raise RuntimeError("NGspice run failed; halting tool chain.")
 
     def run(self, tool_chain: Dict) -> ToolCallingResult:
+        validate_tool_chain(tool_chain)
         gain = None
         Dc_gain = None
         tr_gain = None

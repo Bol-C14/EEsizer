@@ -41,7 +41,14 @@ from agent_test_gpt.simulation_utils import (
     trans_simulation,
     unity_bandwidth,
 )
-from agent_test_gpt.toolchain import combine_results, extract_tool_data, format_analysis_types, format_simulation_tools, format_simulation_types
+from agent_test_gpt.toolchain import (
+    combine_results,
+    extract_tool_data,
+    format_analysis_types,
+    format_simulation_tools,
+    format_simulation_types,
+    validate_tool_chain,
+)
 
 load_dotenv()
 
@@ -207,6 +214,7 @@ def run_agent(user_question: str, user_netlist: str, run_dir: str | None = None)
     formatted_analysis_types = format_analysis_types(tool_data_list)
     tool_chain_row = combine_results(formatted_sim_types, formatted_sim_tools, formatted_analysis_types)
     tool_chain = {"tool_calls": tool_chain_row}
+    validate_tool_chain(tool_chain)
     print("----------------------function used-----------------------------")
     print(tool_chain)
 
