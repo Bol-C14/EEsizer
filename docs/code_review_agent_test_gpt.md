@@ -4,10 +4,15 @@ Scope: current `agent_test_gpt` package after the initial refactors (LLM prompts
 
 ## Critical
 - Unbounded, untrusted code execution via LLM-controlled inputs: the main driver feeds raw LLM JSON into `globals()` (`agent_test_gpt/agent_gpt_openai.py:159-177`) and later passes LLM-crafted netlists to `run_ngspice` (`agent_test_gpt/agent_gpt_openai.py:351`, `agent_test_gpt/optimization.py:351`), giving the model effective code execution and filesystem write ability with no validation or sandboxing.
+- Mitigation: `agent_test_gpt/agent_gpt_openai.py` now parses LLM JSON into typed dataclasses (`TaskQuestions`) without touching globals; netlists are sanitized (`sanitize_netlist`) to strip `.control` blocks and unsafe includes, and every simulation/optimization run is scoped to a per-run output dir with validated ngspice invocation.
 - Unsafe argument parsing with `eval`: `extract_tool_data` falls back to `eval` on LLM-supplied strings (`agent_test_gpt/toolchain.py:70-74`), enabling arbitrary code execution.
+- Mitigation: `extract_tool_data` now uses strict JSON parsing only, supports concatenated objects without `eval`, and drops unknown argument types.
 - Hard-coded user input and netlist: a single fixed question and circuit string are baked into the entrypoint (`agent_test_gpt/agent_gpt_openai.py:78-144`), so the app cannot be safely reused across users, and these constants are reused in optimization/reporting paths without override hooks.
+- Mitigation: `run_agent(user_question, user_netlist, run_dir)` accepts caller-provided inputs; defaults remain only for compatibility, with per-run isolation.
 - LLM-defined globals and variable injection: `get_tasks` writes arbitrary keys from LLM output into module globals (`agent_test_gpt/agent_gpt_openai.py:159-177`) and `_parse_target_values` repeats the pattern (`agent_test_gpt/optimization.py:229-290`), letting the model define variables/code paths and creating cross-run leakage.
+- Mitigation: globals are removed; task/target parsing returns structured objects (`TaskQuestions`, `TargetValues`) and flows carry state explicitly through contexts.
 - Tool/optimization loops run external processes without timeouts or error gates: `run_ngspice` spawns ngspice on unvalidated netlists with no timeout or resource guard (`agent_test_gpt/simulation_utils.py:777-844`). Optimization repeats LLM calls and ngspice invocations inside a while-loop gated only by iteration count and sleeps (`agent_test_gpt/optimization.py:521-599`), risking runaway jobs.
+- Mitigation: `run_ngspice` now enforces timeouts and per-run output directories; tool/optimization runners raise on failed ngspice runs. Fixed sleeps were removed in favor of configurable `llm_delay_seconds` (default 0) so loops do not stall silently.
 
 ## Major
 - Global state mutation driven by LLM: both task parsing and target parsing write into module globals (`agent_test_gpt/agent_gpt_openai.py:159-177`, `agent_test_gpt/optimization.py:229-290`), making behavior order-dependent, non-reentrant, and hard to test.
