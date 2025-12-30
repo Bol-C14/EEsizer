@@ -578,14 +578,13 @@ class OptimizationRunner:
         while iteration < max_iterations and not converged:
             with open(self.config.history_file, "r") as f:
                 previous_results = f.read()
-            print(f"----------------------iter = {iteration}-----------------------------")
+            self.logger.info("Iteration %s", iteration)
 
             modified_output = self._run_llm_cycle(previous_results, sizing_Question, opti_netlist)
-            print("----------------------Modified-----------------------------")
-            print(modified_output)
-            time.sleep(10)
+            self.logger.debug("Modified output: %s", modified_output)
+            if self.config.llm_delay_seconds:
+                time.sleep(self.config.llm_delay_seconds)
 
-            print("------------------------result-----------------------------")
             metrics, vgscheck, opti_netlist, cmrr_max = self._run_tool_calls(tools, modified_output)
 
             opti_output = (
@@ -603,7 +602,7 @@ class OptimizationRunner:
             )
 
             self._append_metrics(lists, metrics)
-            print(opti_output)
+            self.logger.info("Opti output: %s", opti_output)
 
             self._update_pass_flags(targets, metrics, passes)
 
@@ -638,19 +637,31 @@ class OptimizationRunner:
 
             _write_history(self.config.history_file, previous_results_list)
 
-            print(
-                f"gain_target:{targets['gain_target']}, tr_gain_target:{targets['tr_gain_target']},"
-                f"output_swing_target:{targets['output_swing_target']}, input_offset_target:{targets['input_offset_target']}, "
-                f"icmr_target:{targets['icmr_target']}, unity_bandwidth_target:{targets['unity_bandwidth_target']}, "
-                f"phase_margin_target:{targets['phase_margin_target']}, power_target:{targets['pr_target']}, "
-                f"cmrr_target:{targets['cmrr_target']}, thd_target:{targets['thd_target']}"
+            self.logger.debug(
+                "Targets: gain=%s tr_gain=%s ow=%s offset=%s icmr=%s ubw=%s pm=%s power=%s cmrr=%s thd=%s",
+                targets['gain_target'],
+                targets['tr_gain_target'],
+                targets['output_swing_target'],
+                targets['input_offset_target'],
+                targets['icmr_target'],
+                targets['unity_bandwidth_target'],
+                targets['phase_margin_target'],
+                targets['pr_target'],
+                targets['cmrr_target'],
+                targets['thd_target'],
             )
-            print(
-                f"gain_pass:{passes['gain_pass']},tr_gain_pass:{passes['tr_gain_pass']},"
-                f"output_swing_pass:{passes['ow_pass']},input_offset_pass:{passes['input_offset_pass']}, "
-                f"icmr_pass:{passes['icmr_pass']}, unity_bandwidth_pass:{passes['ubw_pass']}, "
-                f"phase_margin_pass:{passes['pm_pass']}, power_pass:{passes['pr_pass']}, "
-                f"cmrr_pass:{passes['cmrr_pass']} , thd_pass:{passes['thd_pass']}"
+            self.logger.debug(
+                "Pass flags: gain=%s tr_gain=%s ow=%s offset=%s icmr=%s ubw=%s pm=%s power=%s cmrr=%s thd=%s",
+                passes['gain_pass'],
+                passes['tr_gain_pass'],
+                passes['ow_pass'],
+                passes['input_offset_pass'],
+                passes['icmr_pass'],
+                passes['ubw_pass'],
+                passes['pm_pass'],
+                passes['pr_pass'],
+                passes['cmrr_pass'],
+                passes['thd_pass'],
             )
 
         self._write_csv_results(initial_metrics, lists)

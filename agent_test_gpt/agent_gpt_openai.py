@@ -49,8 +49,10 @@ from agent_test_gpt.toolchain import (
     format_simulation_types,
     validate_tool_chain,
 )
+from agent_test_gpt.logging_utils import get_logger
 
 load_dotenv()
+_logger = get_logger(__name__)
 
 # Default sample inputs kept for backward compatibility; callers should pass their own.
 DEFAULT_TASKS_GENERATION_QUESTION = (
@@ -197,16 +199,13 @@ def run_agent(user_question: str, user_netlist: str, run_dir: str | None = None)
     # Node discovery
     node_prompt = prompts.build_node_prompt(tasks_parsed.node_question, sanitized_netlist)
     nodes_raw = make_chat_completion_request(node_prompt)
-    print(nodes_raw)
+    _logger.info("Nodes response: %s", nodes_raw)
     input_nodes, output_nodes, source_names = nodes_extract(nodes_raw)
-    print("----------------------node extract-----------------------------")
-    print(f"input_nodes:{input_nodes}")
-    print(f"output_nodes:{output_nodes}")
-    print(f"source_names:{source_names}")
+    _logger.info("input_nodes:%s output_nodes:%s source_names:%s", input_nodes, output_nodes, source_names)
 
     # Simulation tool chain from LLM
     sim_prompts_gen = prompts.build_simulation_prompt(tasks_parsed.sizing_question)
-    print(sim_prompts_gen)
+    _logger.info("Simulation prompt: %s", sim_prompts_gen)
     tool_response = make_chat_completion_request_function(tasks_parsed.sizing_question)
     tool_data_list = extract_tool_data(tool_response)
     formatted_sim_types = format_simulation_types(tool_data_list)
@@ -215,19 +214,16 @@ def run_agent(user_question: str, user_netlist: str, run_dir: str | None = None)
     tool_chain_row = combine_results(formatted_sim_types, formatted_sim_tools, formatted_analysis_types)
     tool_chain = {"tool_calls": tool_chain_row}
     validate_tool_chain(tool_chain)
-    print("----------------------function used-----------------------------")
-    print(tool_chain)
+    _logger.info("Tool chain: %s", tool_chain)
 
     tool_result = tool_calling(tool_chain, sanitized_netlist, source_names, output_nodes, output_dir=str(run_root))
     sim_output = tool_result.sim_output
     sim_netlist = tool_result.sim_netlist
-    print("-------------------------result---------------------------------")
-    print(sim_output)
-    print("-------------------------netlist---------------------------------")
-    print(sim_netlist)
+    _logger.info("Initial simulation output: %s", sim_output)
+    _logger.debug("Initial sim netlist: %s", sim_netlist)
 
     sizing_question_full = f"Currently, {sim_output}. " + tasks_parsed.sizing_question
-    print(sizing_question_full)
+    _logger.info("Sizing question: %s", sizing_question_full)
     opt_config = OptimizationConfig.from_output_dir(str(run_root))
 
     def optimization(tools, target_values_str: str, sim_netlist_text: str, extracting_method):
@@ -272,11 +268,16 @@ def run_agent(user_question: str, user_netlist: str, run_dir: str | None = None)
         initial_metrics = build_initial_metrics(tool_result.metrics)
         return runner.run(tools, target_values_str, sim_netlist_text, extracting_method, initial_metrics)
 
-    results = run_multiple_optimizations(target_values, sim_netlist, tool_chain, extract_number, optimization)
-    source_file = Path(run_root) / "netlist.cir"
-    copy_netlist(str(source_file), config.NETLIST_OUTPUT_PATH)
-    plot_optimization_history(csv_path=opt_config.csv_file, output_pdf=config.PLOT_PDF_PATH)
-    return results
+    try:
+        results = run_multiple_optimizations(target_values, sim_netlist, tool_chain, extract_number, optimization)
+        source_file = Path(run_root) / "netlist.cir"
+        final_copy = Path(run_root) / "netlist_final.cir"
+        copy_netlist(str(source_file), str(final_copy))
+        plot_optimization_history(csv_path=opt_config.csv_file, output_pdf=str(Path(run_root) / "optimization.pdf"))
+        return results
+    except Exception as exc:
+        _logger.error("Run failed: %s", exc, exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
