@@ -13,6 +13,7 @@ import numpy as np
 from agent_test_gpt import prompts
 from agent_test_gpt import config
 from agent_test_gpt.simulation_utils import _ensure_flat_str_list
+from agent_test_gpt.models import TargetValues
 
 
 @dataclass
@@ -188,6 +189,8 @@ class OptimizationContext:
     sim_output: str
     sizing_question: str
     type_identified: str
+    source_names: List[str]
+    output_nodes: List[str]
 
 
 @dataclass
@@ -206,6 +209,10 @@ class OptimizationConfig:
 @dataclass
 class OptimizationDeps:
     make_chat_completion_request: Callable
+    sanitize_netlist: Callable
+    dc_simulation: Callable
+    ac_simulation: Callable
+    trans_simulation: Callable
     run_ngspice: Callable
     filter_lines: Callable
     convert_to_csv: Callable
@@ -226,39 +233,32 @@ class OptimizationDeps:
     extract_code: Callable
 
 
-def _parse_target_values(target_values: str, extracting_method: Callable) -> Tuple[Dict[str, float | None], Dict[str, bool]]:
-    target_values = target_values.strip().strip("`")
-    target_values = target_values.replace("json", "").strip()
+def parse_target_values(target_values: str, extracting_method: Callable) -> TargetValues:
+    """Parse target values JSON from LLM into structured targets and pass flags without globals."""
+    cleaned = target_values.strip().strip("`").replace("json", "").strip()
+    payload = json.loads(cleaned)
+    if "target_values" not in payload or not isinstance(payload["target_values"], list):
+        raise ValueError("target_values must contain a list under 'target_values'")
 
-    target_output = json.loads(target_values)
-    for target_dict in target_output["target_values"]:
-        for key, value in target_dict.items():
-            globals()[key] = value
+    merged: Dict[str, float | None] = {}
+    for item in payload["target_values"]:
+        if not isinstance(item, dict):
+            continue
+        for key, value in item.items():
+            merged[key] = value
 
-    gain_target = extracting_method(globals().get("ac_gain_target", "0")) if "ac_gain_target" in globals() else None
-    bandwidth_target = extracting_method(globals().get("bandwidth_target", "0")) if "bandwidth_target" in globals() else None
-    unity_bandwidth_target = extracting_method(globals().get("unity_bandwidth_target", "0")) if "unity_bandwidth_target" in globals() else None
-    phase_margin_target = extracting_method(globals().get("phase_margin_target", "0")) if "phase_margin_target" in globals() else None
-    tr_gain_target = extracting_method(globals().get("transient_gain_target", "0")) if "transient_gain_target" in globals() else None
-    input_offset_target = extracting_method(globals().get("input_offset_target", "0")) if "input_offset_target" in globals() else None
-    output_swing_target = extracting_method(globals().get("output_swing_target", "0")) if "output_swing_target" in globals() else None
-    pr_target = extracting_method(globals().get("power_target", "0")) if "power_target" in globals() else None
-    cmrr_target = extracting_method(globals().get("cmrr_target", "0")) if "cmrr_target" in globals() else None
-    thd_target = -np.abs(extracting_method(globals().get("thd_target", "0")) if "thd_target" in globals() else None)
-    icmr_target = extracting_method(globals().get("input_common_mode_range_target", "0")) if "input_common_mode_range_target" in globals() else None
-
-    gain_pass = True if gain_target not in globals() or gain_target is None else False
-    tr_gain_pass = True if tr_gain_target not in globals() or tr_gain_target is None else False
-    dc_gain_pass = True if tr_gain_target not in globals() or tr_gain_target is None else False
-    ow_pass = True if output_swing_target not in globals() or output_swing_target is None else False
-    bw_pass = True if bandwidth_target not in globals() or bandwidth_target is None else False
-    ubw_pass = True if unity_bandwidth_target not in globals() or unity_bandwidth_target is None else False
-    pm_pass = True if phase_margin_target not in globals() or phase_margin_target is None else False
-    pr_pass = True if pr_target not in globals() or pr_target is None else False
-    cmrr_pass = True if cmrr_target not in globals() or cmrr_target is None else False
-    thd_pass = True if thd_target not in globals() or thd_target is None else False
-    input_offset_pass = True if input_offset_target not in globals() or input_offset_target is None else False
-    icmr_pass = True if icmr_target not in globals() or icmr_target is None else False
+    gain_target = extracting_method(merged.get("ac_gain_target", "0")) if "ac_gain_target" in merged else None
+    bandwidth_target = extracting_method(merged.get("bandwidth_target", "0")) if "bandwidth_target" in merged else None
+    unity_bandwidth_target = extracting_method(merged.get("unity_bandwidth_target", "0")) if "unity_bandwidth_target" in merged else None
+    phase_margin_target = extracting_method(merged.get("phase_margin_target", "0")) if "phase_margin_target" in merged else None
+    tr_gain_target = extracting_method(merged.get("transient_gain_target", "0")) if "transient_gain_target" in merged else None
+    input_offset_target = extracting_method(merged.get("input_offset_target", "0")) if "input_offset_target" in merged else None
+    output_swing_target = extracting_method(merged.get("output_swing_target", "0")) if "output_swing_target" in merged else None
+    pr_target = extracting_method(merged.get("power_target", "0")) if "power_target" in merged else None
+    cmrr_target = extracting_method(merged.get("cmrr_target", "0")) if "cmrr_target" in merged else None
+    thd_raw = extracting_method(merged.get("thd_target", "0")) if "thd_target" in merged else None
+    thd_target = -np.abs(thd_raw) if thd_raw is not None else None
+    icmr_target = extracting_method(merged.get("input_common_mode_range_target", "0")) if "input_common_mode_range_target" in merged else None
 
     targets = {
         "gain_target": gain_target,
@@ -274,20 +274,20 @@ def _parse_target_values(target_values: str, extracting_method: Callable) -> Tup
         "icmr_target": icmr_target,
     }
     passes = {
-        "gain_pass": gain_pass,
-        "tr_gain_pass": tr_gain_pass,
-        "dc_gain_pass": dc_gain_pass,
-        "ow_pass": ow_pass,
-        "bw_pass": bw_pass,
-        "ubw_pass": ubw_pass,
-        "pm_pass": pm_pass,
-        "pr_pass": pr_pass,
-        "cmrr_pass": cmrr_pass,
-        "thd_pass": thd_pass,
-        "input_offset_pass": input_offset_pass,
-        "icmr_pass": icmr_pass,
+        "gain_pass": gain_target is None,
+        "tr_gain_pass": tr_gain_target is None,
+        "dc_gain_pass": tr_gain_target is None,
+        "ow_pass": output_swing_target is None,
+        "bw_pass": bandwidth_target is None,
+        "ubw_pass": unity_bandwidth_target is None,
+        "pm_pass": phase_margin_target is None,
+        "pr_pass": pr_target is None,
+        "cmrr_pass": cmrr_target is None,
+        "thd_pass": thd_target is None,
+        "input_offset_pass": input_offset_target is None,
+        "icmr_pass": icmr_target is None,
     }
-    return targets, passes
+    return TargetValues(targets=targets, passes=passes)
 
 
 def _write_history(path: str, items: List[str]) -> None:
@@ -342,12 +342,26 @@ class OptimizationRunner:
         cmrr_max = None
         opti_netlist = None
 
+        raw_netlist = self.deps.extract_code(modified_output)
+        try:
+            opti_netlist = self.deps.sanitize_netlist(raw_netlist)
+        except Exception as exc:
+            raise ValueError(f"LLM-produced netlist failed safety checks: {exc}") from exc
+        print(opti_netlist)
+
+        source_names = _ensure_flat_str_list("context.source_names", self.context.source_names)
+        output_nodes = _ensure_flat_str_list("context.output_nodes", self.context.output_nodes)
+
         for tool_call in tools["tool_calls"]:
-            opti_netlist = self.deps.extract_code(modified_output)
-            print(opti_netlist)
             tool_name = tool_call["name"].lower()
 
-            if tool_name == "run_ngspice":
+            if tool_name == "dc_simulation":
+                opti_netlist = self.deps.dc_simulation(opti_netlist, source_names, output_nodes)
+            elif tool_name == "ac_simulation":
+                opti_netlist = self.deps.ac_simulation(opti_netlist, source_names, output_nodes)
+            elif tool_name == "transient_simulation":
+                opti_netlist = self.deps.trans_simulation(opti_netlist, source_names, output_nodes)
+            elif tool_name == "run_ngspice":
                 self.deps.run_ngspice(opti_netlist, "netlist")
                 print("running ngspice")
                 self.deps.filter_lines(self.config.input_txt, self.config.filtered_txt)
@@ -513,7 +527,9 @@ class OptimizationRunner:
             "icmr_output_list": [],
         }
 
-        targets, passes = _parse_target_values(target_values, extracting_method)
+        target_bundle = parse_target_values(target_values, extracting_method)
+        targets = target_bundle.targets
+        passes = target_bundle.passes
         opti_netlist = sim_netlist
         previous_results_list = self._initialize_history(opti_netlist)
         sizing_Question = f"Currently, {self.context.sim_output}. " + self.context.sizing_question
