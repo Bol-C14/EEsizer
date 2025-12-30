@@ -49,7 +49,8 @@ from agent_test_gpt.toolchain import (
     format_simulation_types,
     validate_tool_chain,
 )
-from agent_test_gpt.logging_utils import get_logger
+from agent_test_gpt.logging_utils import get_logger, setup_run_logging
+from agent_test_gpt import llm_client
 
 load_dotenv()
 _logger = get_logger(__name__)
@@ -177,9 +178,20 @@ def tool_calling(tool_chain, netlist_text, source_names: List[str], output_nodes
 
 def run_agent(user_question: str, user_netlist: str, run_dir: str | None = None):
     """End-to-end agent run with explicit inputs instead of globals."""
-    sanitized_netlist = sanitize_netlist(user_netlist)
     run_root = Path(run_dir or Path(config.RUN_OUTPUT_ROOT) / uuid.uuid4().hex)
     run_root.mkdir(parents=True, exist_ok=True)
+    setup_run_logging(str(run_root), level=os.getenv("LOG_LEVEL"))
+    manifest = {
+        "user_question": user_question,
+        "run_dir": str(run_root),
+        "model": llm_client.DEFAULT_MODEL,
+        "function_model": llm_client.DEFAULT_FUNCTION_MODEL,
+        "temperature": llm_client.DEFAULT_TEMPERATURE,
+        "log_level": os.getenv("LOG_LEVEL", "INFO"),
+        "cwd": os.getcwd(),
+    }
+    (run_root / "run_manifest.json").write_text(json.dumps(manifest, indent=2))
+    sanitized_netlist = sanitize_netlist(user_netlist)
 
     # Task decomposition
     tasks_generation_prompt = prompts.build_tasks_generation_prompt(user_question, sanitized_netlist)
