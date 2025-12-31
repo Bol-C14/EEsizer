@@ -1,0 +1,26 @@
+{
+  "name": "EEsizer (Ubuntu + Python + ngspice)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspaces/EEsizer",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter"
+      ]
+    }
+  },
+
+  // 第一次先别搞复杂的 postCreate，确保能进容器
+  "postCreateCommand": "python3 -m pip install -U pip && python3 -m pip install jupyter ipykernel",
+
+  // 可选：如果你要用 .env（API_KEY/URL），建议加上
+  "containerEnv": {
+    "PYTHONUNBUFFERED": "1"
+  }
+}
