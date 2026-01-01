@@ -805,9 +805,14 @@ def run_ngspice(circuit, filename, output_dir: str, timeout_s: int = 120):
     output_path = Path(output_dir)
     output_file = output_path / 'op.txt'
     cir_path = output_path / f'{filename}.cir'
+    log_file = None
     if not output_path.exists():
         print(f'Creating output directory `{output_path}`.')
         output_path.mkdir(parents=True, exist_ok=True)
+    if config.NGSPICE_LOG_TO_AGENT:
+        log_dir = output_path / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "agent.log"
     normalized = normalize_spice_includes(circuit)
     with open(cir_path, 'w') as f:
         f.write(normalized)
@@ -845,6 +850,9 @@ def run_ngspice(circuit, filename, output_dir: str, timeout_s: int = 120):
         _logger.error(msg)
         with open(output_file, 'w') as f:
             f.write(msg + "\n")
+        if log_file:
+            with open(log_file, "a") as f:
+                f.write(f"\n--- NGspice stdout/stderr ({filename}) ---\n{msg}\n--- end NGspice ---\n")
         return False
 
     try:
@@ -857,6 +865,9 @@ def run_ngspice(circuit, filename, output_dir: str, timeout_s: int = 120):
         ngspice_output = result.stdout + ('\n' + result.stderr if result.stderr else '')
         with open(output_file, "w") as f:
             f.write(ngspice_output)
+        if log_file:
+            with open(log_file, "a") as f:
+                f.write(f"\n--- NGspice stdout/stderr ({filename}) ---\n{ngspice_output}\n--- end NGspice ---\n")
         if result.returncode != 0:
             _logger.error("NGspice failed with return code %s", result.returncode)
             return False
@@ -867,12 +878,18 @@ def run_ngspice(circuit, filename, output_dir: str, timeout_s: int = 120):
         msg = f"NGSPICE_TIMEOUT after {timeout_s}s: {e}"
         with open(output_file, "w") as f:
             f.write(msg)
+        if log_file:
+            with open(log_file, "a") as f:
+                f.write(f"\n--- NGspice stdout/stderr ({filename}) ---\n{msg}\n--- end NGspice ---\n")
         _logger.error(msg)
         return False
     except Exception as e:
         ngspice_output = f"Error running NGspice: {str(e)}"
         with open(output_file, "w") as f:
             f.write(ngspice_output)
+        if log_file:
+            with open(log_file, "a") as f:
+                f.write(f"\n--- NGspice stdout/stderr ({filename}) ---\n{ngspice_output}\n--- end NGspice ---\n")
         _logger.error(ngspice_output, exc_info=True)
         return False
 

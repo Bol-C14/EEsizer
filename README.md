@@ -51,7 +51,7 @@ PYTHONPATH=. pytest
 
 ## Configuration Highlights
 - Models/temperature via env: `LLM_MODEL`, `LLM_FUNCTION_MODEL`, `LLM_TEMPERATURE`.
-- Logging: `LOG_LEVEL` and per-run file logging (`logs/agent.log`).
+- Logging: `LOG_LEVEL` and per-run file logging (`logs/agent.log`); set `NGSPICE_LOG_TO_AGENT=0` to skip appending NGspice stdout/stderr.
 - Paths resolved relative to project root; PTM files under `agent_test_gpt/resources/`.
 
 ## Safety & Validation

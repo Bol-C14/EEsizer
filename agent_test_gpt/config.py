@@ -1,5 +1,6 @@
 """Shared configuration constants."""
 
+import os
 from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -20,3 +21,6 @@ VGS_OUTPUT_PATH = str(PROJECT_ROOT / "output" / "vgscheck_output.txt")
 
 MAX_ITERATIONS = 25
 TOLERANCE = 0.05
+
+# When enabled, append NGspice stdout/stderr to output/runs/<uuid>/logs/agent.log.
+NGSPICE_LOG_TO_AGENT = os.getenv("NGSPICE_LOG_TO_AGENT", "1").lower() in {"1", "true", "yes"}
