@@ -48,6 +48,7 @@ from agent_test_gpt.toolchain import (
     format_analysis_types,
     format_simulation_tools,
     format_simulation_types,
+    normalize_tool_chain,
     validate_tool_chain,
 )
 from agent_test_gpt.logging_utils import get_logger, setup_run_logging
@@ -229,7 +230,7 @@ def run_agent(user_question: str, user_netlist: str, run_dir: str | None = None)
     formatted_sim_tools = format_simulation_tools(tool_data_list)
     formatted_analysis_types = format_analysis_types(tool_data_list)
     tool_chain_row = combine_results(formatted_sim_types, formatted_sim_tools, formatted_analysis_types)
-    tool_chain = {"tool_calls": tool_chain_row}
+    tool_chain = normalize_tool_chain({"tool_calls": tool_chain_row})
     validate_tool_chain(tool_chain)
     _logger.info("Tool chain: %s", tool_chain)
 

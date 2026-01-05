@@ -129,7 +129,7 @@ class TestToolFormatting(unittest.TestCase):
             {"raw_args": {}},
             {},
         ]
-        expected = [{"name": "run_ngspice"}]
+        expected = []
         self.assertEqual(toolchain.format_simulation_tools(tool_data_list), expected)
 
     def test_format_analysis_types(self):

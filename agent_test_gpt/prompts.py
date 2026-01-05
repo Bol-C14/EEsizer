@@ -68,7 +68,7 @@ SIMULATION_FUNCTION_EXPLANATION = """
 You should decide which tools to use from user input and think about the question and return an array for functions. 
 When user ask to simulate or give specfic circuit performance, please think about which types of simulation should be done and which function in simulation functions can do this according to user requirement. e.g. Target is ac gain and transient gain, then return the type sc_simulation and transient_simulation.
 e.g. Target is output swing and offset, then return the type dc_simulation.
-Then, the netlist should be simulated by simulation tools run_ngspice. The should be only called once.
+Each simulation_* will automatically run ngspice and write its own outputs; do not call run_ngspice separately (calls will be ignored). Only return JSON tool_calls for simulation_* and analysis functions; do not embed .control blocks or file paths.
 Finaly, to analysis the output data file, some specfic functions should be done to calculate and give the final result. Choose the analysis functions to do this.
 Please notice that bandwidth and unity bandwidth are different.
 

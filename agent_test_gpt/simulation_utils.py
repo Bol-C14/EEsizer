@@ -14,8 +14,9 @@ from scipy.fft import fft, fftfreq
 from scipy.signal import find_peaks
 
 from agent_test_gpt import config
-from agent_test_gpt.netlist_utils import normalize_spice_includes
 from agent_test_gpt.logging_utils import get_logger
+from agent_test_gpt.metrics_contract import MetricError
+from agent_test_gpt.netlist_utils import normalize_spice_includes
 
 _logger = get_logger(__name__)
 
@@ -52,6 +53,73 @@ def _require_file(path: str):
     if not p.exists() or p.stat().st_size == 0:
         raise RuntimeError(f"Required simulation data missing or empty: {path}")
     return path
+
+
+def _load_ac_vector(file_name: str, output_dir: str):
+    """Load AC wrdata file and return frequency vector and complex output."""
+
+    data_path = _require_file(_out_path(output_dir, f"{file_name}.dat"))
+    data_ac = np.genfromtxt(data_path, skip_header=1)
+    num_columns = data_ac.shape[1]
+
+    if num_columns == 3:
+        freq = data_ac[:, 0]
+        v = data_ac[:, 1] + 1j * data_ac[:, 2]
+    elif num_columns == 6:
+        freq = data_ac[:, 0]
+        v = data_ac[:, 4] + 1j * data_ac[:, 5]
+    else:
+        raise ValueError("AC data must have 3 or 6 columns (freq, Re, Im[, freq, Re, Im])")
+
+    if freq.size < 2:
+        raise MetricError("AC data has insufficient samples")
+
+    return freq, v
+
+
+def _gain_db(v: np.ndarray) -> np.ndarray:
+    """Return magnitude in dB, guarding against log10(0)."""
+
+    mag = np.abs(v)
+    mag = np.maximum(mag, 1e-30)
+    return 20 * np.log10(mag)
+
+
+def _interp_crossing(x0, y0, x1, y1, y_target):
+    """Linearly interpolate x where y crosses y_target between points."""
+
+    if y1 == y0:
+        return float(x1)
+    return float(x0 + (y_target - y0) * (x1 - x0) / (y1 - y0))
+
+
+def _first_crossing(freq: np.ndarray, y_db: np.ndarray, target_db: float, from_above: bool = True) -> float:
+    """Find the first frequency where y_db crosses target_db."""
+
+    mask = y_db <= target_db if from_above else y_db >= target_db
+    indices = np.where(mask)[0]
+    if len(indices) == 0:
+        raise MetricError(f"No crossing found for target {target_db} dB")
+
+    i = indices[0]
+    if i == 0:
+        return float(freq[0])
+
+    return _interp_crossing(freq[i - 1], y_db[i - 1], freq[i], y_db[i], target_db)
+
+
+def _calc_output_swing(output: np.ndarray, in1: np.ndarray, gain_target: float, tol: float) -> float:
+    """Compute linear output swing given output vs input and gain target."""
+
+    d_output_d_in1 = np.abs(np.gradient(output, in1))
+    indices = np.where(d_output_d_in1 >= (1 - tol) * gain_target)
+    output_linear = output[indices]
+
+    if output_linear.size > 0:
+        return float(np.max(output_linear) - np.min(output_linear))
+
+    _logger.warning("No values found where gain >= %.2f of target %.2f", (1 - tol), gain_target)
+    return 0.0
 
 
 def _find_end_index(netlist: str) -> int:
@@ -177,30 +245,9 @@ def out_swing(filename, output_dir: str):
     data_dc = np.genfromtxt(data_path, skip_header=1)
     output = data_dc[0:,1]
     in1 = data_dc[0:,3]
-    d_output_d_in1 = np.gradient(output, in1)
-
-    # Replace zero or near-zero values with a small epsilon to avoid log10(0) error
-    epsilon = 1e-10
-    d_output_d_in1 = np.where(np.abs(d_output_d_in1) < epsilon, epsilon, np.abs(d_output_d_in1))
-    _logger.debug("d_output_d_in1: %s", d_output_d_in1)
-
-    # Compute gain safely
-    #gain = 20 * np.log10(np.abs(d_output_d_in1))
-    grad = 10
-    indices = np.where(d_output_d_in1 >= 0.95*grad)
-    output_above_threshold = output[indices]
-    #print(output_above_threshold)
-    if output_above_threshold.size > 0:
-        vout_first = output_above_threshold[0]  # First value
-        vout_last = output_above_threshold[-1]  # Last value
-        ow = vout_first - vout_last # Difference
-
-        print(f"First output: {vout_first}")
-        print(f"Last output: {vout_last}")
-        #print(f"Difference: {vout_diff}")
-    else:
-        ow = 0
-        _logger.warning("No values found where gain >= 0.9*grad")
+    gain_target = config.OUT_SWING_GAIN_TARGET
+    tol = config.OUT_SWING_GAIN_TOL
+    ow = _calc_output_swing(output, in1, gain_target, tol)
     _logger.info("output swing: %s", ow)
     return ow
 
@@ -354,91 +401,34 @@ def tran_gain(file_name, output_dir: str):
 
 
 def ac_gain(file_name, output_dir: str):
-    data_path = _require_file(_out_path(output_dir, f'{file_name}.dat'))
-    data_ac = np.genfromtxt(data_path, skip_header=1)
-    num_columns = data_ac.shape[1]
+    freq, v = _load_ac_vector(file_name, output_dir)
+    gain_db = _gain_db(v)
+    k = min(5, len(gain_db))
+    dc_gain_db = float(np.median(gain_db[:k]))
 
-    # for one output node
-    if num_columns == 3:
-        frequency = data_ac[:, 0]
-        v_d = data_ac[:, 1] + 1j * data_ac[:, 2]
-        gain = 20 * np.log10(np.abs(v_d[0]))
-    # for 2 output nodes
-    elif num_columns == 6:
-        v_d = data_ac[:, 4] + 1j * data_ac[:, 5]
-        gain = 20 * np.log10(np.abs(v_d[0]))
-    else:
-        raise ValueError("The input file must have either 3 or 6 columns.")
-
-    _logger.info("gain = %s", gain)
-
-    return gain
+    _logger.info("gain = %s", dc_gain_db)
+    return dc_gain_db
 
 
 def bandwidth(file_name, output_dir: str):
-    data_path = _require_file(_out_path(output_dir, f'{file_name}.dat'))
-    data_ac = np.genfromtxt(data_path, skip_header=1)
-    num_columns = data_ac.shape[1]
-    frequency = data_ac[:, 0]
+    freq, v = _load_ac_vector(file_name, output_dir)
+    gain_db = _gain_db(v)
+    k = min(5, len(gain_db))
+    a0_db = float(np.median(gain_db[:k]))
+    target = a0_db - 3
 
-    # for one output node
-    if num_columns == 3:
-        v_d = data_ac[:, 1] + 1j * data_ac[:, 2]
-        output = 20 * np.log10(v_d)
-        gain = 20 * np.log10(np.abs(v_d[0]))
-    # for 2 output nodes
-    elif num_columns == 6:
-        v_d = data_ac[:, 4] + 1j * data_ac[:, 5]
-        output = 20 * np.log10(v_d)
-        gain = 20 * np.log10(np.abs(v_d[0]))
-
-    half_power_point = gain - 3
-
-    indices = np.where(output >= half_power_point)[0]
-
-    if len(indices) > 0:
-        f_l = frequency[indices[0]]
-        f_h = frequency[indices[-1]]
-        bandwidth = f_h - f_l
-    else:
-        f_l = f_h = bandwidth = 0
-
-    _logger.info("bandwidth = %s", bandwidth)
-
-    return bandwidth
+    bw = _first_crossing(freq, gain_db, target_db=target, from_above=True)
+    _logger.info("bandwidth (-3dB) = %s", bw)
+    return bw
 
 
 def unity_bandwidth(file_name, output_dir: str):
-    data_path = _require_file(_out_path(output_dir, f'{file_name}.dat'))
-    data_ac = np.genfromtxt(data_path, skip_header=1)
-    num_columns = data_ac.shape[1]
-    frequency = data_ac[:, 0]
+    freq, v = _load_ac_vector(file_name, output_dir)
+    gain_db = _gain_db(v)
+    ugbw = _first_crossing(freq, gain_db, target_db=0, from_above=True)
 
-    # for one output node
-    if num_columns == 3:
-        v_d = data_ac[:, 1] + 1j * data_ac[:, 2]
-        output = 20 * np.log10(v_d)
-        gain = 20 * np.log10(np.abs(v_d[0]))
-    # for 2 output nodes
-    elif num_columns == 6:
-        v_d = data_ac[:, 4] + 1j * data_ac[:, 5]
-        output = 20 * np.log10(v_d)
-        gain = 20 * np.log10(np.abs(v_d[0]))
-
-    half_power_point = 0
-
-    indices = np.where(output >= half_power_point)[0]
-
-    if len(indices) > 0:
-        f_l = frequency[indices[0]]
-        f_h = frequency[indices[-1]]
-        bandwidth = f_h - f_l
-    else:
-        f_l = f_h = bandwidth = 0
-
-    _logger.info("unity bandwidth = %s", bandwidth)
-
-    return bandwidth
+    _logger.info("unity bandwidth (0 dB crossing) = %s", ugbw)
+    return ugbw
 
 
 def phase_margin(file_name, output_dir: str):

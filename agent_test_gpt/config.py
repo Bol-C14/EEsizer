@@ -24,3 +24,7 @@ TOLERANCE = 0.05
 
 # When enabled, append NGspice stdout/stderr to output/runs/<uuid>/logs/agent.log.
 NGSPICE_LOG_TO_AGENT = os.getenv("NGSPICE_LOG_TO_AGENT", "1").lower() in {"1", "true", "yes"}
+
+# Output swing measurement parameters.
+OUT_SWING_GAIN_TARGET = float(os.getenv("OUT_SWING_GAIN_TARGET", "10"))
+OUT_SWING_GAIN_TOL = float(os.getenv("OUT_SWING_GAIN_TOL", "0.05"))

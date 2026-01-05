@@ -1,7 +1,10 @@
 """Helpers for parsing and formatting tool calls."""
 
 import json
+import logging
 from typing import Any, Dict, List
+
+_logger = logging.getLogger(__name__)
 
 
 def _normalize_call(parsed_obj: Dict[str, Any] | None, tool_call_obj) -> Dict[str, Any]:
@@ -11,7 +14,7 @@ def _normalize_call(parsed_obj: Dict[str, Any] | None, tool_call_obj) -> Dict[st
     sim_tool = parsed_obj.get("simulation_tool")
 
     if not sim_tool:
-        sim_tool = getattr(tool_call_obj.function, "name", None) or getattr(tool_call_obj, "name", None) or "run_ngspice"
+        sim_tool = getattr(tool_call_obj.function, "name", None) or getattr(tool_call_obj, "name", None)
 
     if str(sim_tool).lower() == "universal_circuit_tool":
         sim_tool = "run_ngspice"
@@ -83,7 +86,6 @@ _ALLOWED_TOOL_NAMES = {
     "dc_simulation",
     "ac_simulation",
     "transient_simulation",
-    "run_ngspice",
     "ac_gain",
     "dc_gain",
     "output_swing",
@@ -128,6 +130,65 @@ _REQUIRED_SIM_FOR_ANALYSIS = {
     "thd_input_range": "transient_simulation",
     # cmrr_tran runs its own ngspice sweep, so no prerequisite simulation here.
 }
+
+_SIMULATION_TOOL_NAMES = [
+    "dc_simulation",
+    "ac_simulation",
+    "transient_simulation",
+]
+
+
+def normalize_tool_chain(tool_chain: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize tool_calls: drop run_ngspice, dedupe sims, and inject required sims for analyses.
+
+    - Removes any run_ngspice entries (ngspice is executed inside simulation_*).
+    - Deduplicates simulation steps while preserving first occurrence order.
+    - Ensures required simulation steps exist for analysis tools (inserting missing ones at the front).
+    """
+    if not isinstance(tool_chain, dict) or "tool_calls" not in tool_chain:
+        return tool_chain
+
+    calls = tool_chain.get("tool_calls") or []
+    normalized = []
+    seen_simulations = set()
+
+    for call in calls:
+        if not isinstance(call, dict):
+            normalized.append(call)
+            continue
+        name_raw = call.get("name")
+        name = str(name_raw).lower() if name_raw is not None else None
+        if name == "run_ngspice":
+            _logger.warning("Dropping run_ngspice tool call; simulation_* already runs ngspice.")
+            continue
+
+        if name in _SIMULATION_TOOL_NAMES:
+            if name in seen_simulations:
+                _logger.debug("Dropping duplicate simulation step: %s", name)
+                continue
+            seen_simulations.add(name)
+            normalized.append({"name": name})
+            continue
+
+        # Keep analysis or other allowed entries; ensure name is lowercased
+        normalized.append({"name": name} | {k: v for k, v in call.items() if k != "name"})
+
+    # Ensure required simulations exist for analyses
+    present_names = [c.get("name") for c in normalized if isinstance(c, dict)]
+    required = []
+    for call in normalized:
+        if not isinstance(call, dict):
+            continue
+        sim_needed = _REQUIRED_SIM_FOR_ANALYSIS.get(call.get("name"))
+        if sim_needed and sim_needed not in present_names and sim_needed not in required:
+            required.append(sim_needed)
+
+    if required:
+        # Insert missing simulations at the front in deterministic order
+        ordered_required = [sim for sim in _SIMULATION_TOOL_NAMES if sim in required]
+        normalized = [{"name": sim} for sim in ordered_required] + normalized
+
+    return {"tool_calls": normalized}
 
 
 def validate_tool_chain(tool_chain: Dict[str, Any]) -> None:
@@ -219,26 +280,9 @@ def format_simulation_types(tool_data_list):
 
 
 def format_simulation_tools(tool_data_list):
-    """Format unique simulation tools. Use fallbacks when fields are missing.
+    """Simulation tools are internal; we do not expose run_ngspice to the LLM."""
 
-    Returns a list of dicts like: {"name": "run_ngspice"}.
-    """
-    unique_sim_tools = set()
-    formatted_output = []
-    for tool_data in tool_data_list:
-        sim_tool = tool_data.get("simulation_tool") or tool_data.get("raw_args", {}).get("simulation_tool")
-        if not sim_tool:
-            # fallback to any sensible metadata contained in raw_args or default
-            sim_tool = tool_data.get("raw_args", {}).get("tool") or tool_data.get("raw_args", {}).get("tool_name")
-        if not sim_tool:
-            sim_tool = "run_ngspice"
-
-        sim_tool = str(sim_tool).lower()
-
-        if sim_tool not in unique_sim_tools:
-            unique_sim_tools.add(sim_tool)
-            formatted_output.append({"name": sim_tool})
-    return formatted_output
+    return []
 
 
 def format_analysis_types(tool_data_list):
