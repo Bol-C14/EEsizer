@@ -1,4 +1,4 @@
-# Change Document: Metrics Correctness & NGspice Logging (2025-12-31)
+# Change Document: Metrics Correctness & NGspice Logging (2026-01-04)
 
 ## Context
 Addressed P0 correctness and observability gaps: AC metrics were using complex log10, unity bandwidth returned a span not a crossing, output swing used a hard-coded gain threshold with a sign error, and NGspice stdout/stderr was not captured in `agent.log`. Added a single source of truth for metric contracts and synthetic tests to lock behavior.
