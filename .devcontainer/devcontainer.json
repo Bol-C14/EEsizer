@@ -1,9 +1,9 @@
 {
   "name": "EEsizer (Ubuntu + Python + ngspice)",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "context": ".."
-  },
+
+  // ✅ 用 image，禁用 devcontainer 的 build 流程
+  "image": "eesizer-dev:local",
+
   "remoteUser": "vscode",
   "workspaceFolder": "/workspaces/EEsizer",
 
@@ -16,10 +16,9 @@
     }
   },
 
-  // 第一次先别搞复杂的 postCreate，确保能进容器
-  "postCreateCommand": "python3 -m pip install -U pip && python3 -m pip install jupyter ipykernel",
+  // 如果你已经在 Dockerfile 里装好了 jupyter/ipykernel，可以把这个删掉或简化
+  "postCreateCommand": "",
 
-  // 可选：如果你要用 .env（API_KEY/URL），建议加上
   "containerEnv": {
     "PYTHONUNBUFFERED": "1"
   }

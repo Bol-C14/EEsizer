@@ -1,5 +1,5 @@
 
-# agent.md — Unified Circuit Processor Dev Rules for LLMs 🤖
+# AGENT.md — Unified Circuit Processor Dev Rules for LLMs 🤖
 
 This file tells you, the LLM-based dev assistant, **how to work in this repo without turning it into spaghetti**.
 
