@@ -18,7 +18,7 @@ class OptimizationBudget:
 @dataclass
 class StrategyConfig:
     budget: OptimizationBudget = field(default_factory=OptimizationBudget)
-    tolerance: float = 0.05  # legacy config.TOLERANCE equivalent
+    seed: Optional[int] = None
     notes: Dict[str, Any] = field(default_factory=dict)
 
 

@@ -26,7 +26,7 @@ def _element_fingerprint(elem: Element) -> Tuple[str, str, Tuple[str, ...], str,
     param_keys = tuple(sorted(elem.params.keys()))
     return (
         elem.etype,
-        elem.name,
+        elem.name.lower(),
         nodes_normalized,
         elem.model_or_subckt or "",
         param_keys,

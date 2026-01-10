@@ -2,58 +2,90 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from ...contracts.artifacts import CircuitIR, ParamSpace, Patch
+from ...contracts.artifacts import CircuitSource, ParamSpace, Patch, TokenLoc
 from ...contracts.errors import ValidationError
 from ...contracts.operators import Operator, OperatorResult
-from ...contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_str
+from ...contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_json, stable_hash_str
 from ...domain.spice.patching import apply_patch_with_topology_guard, validate_patch
+from ...domain.spice.signature import topology_signature
+
+
+def _param_locs_payload(param_locs: dict[str, TokenLoc]) -> dict[str, object]:
+    return {
+        name: {
+            "line_idx": loc.line_idx,
+            "token_idx": loc.token_idx,
+            "key": loc.key,
+            "raw_token": loc.raw_token,
+            "value_span": list(loc.value_span),
+        }
+        for name, loc in sorted(param_locs.items())
+    }
 
 
 class PatchApplyOperator(Operator):
-    """Apply a parameter Patch to a CircuitIR and return updated artifacts."""
+    """从 CircuitSource + ParamSpace + Patch 得到新的 CircuitSource + CircuitIR."""
 
     name = "patch_apply"
     version = "0.1.0"
 
+    def __init__(self, include_paths: bool = True) -> None:
+        self._include_paths = include_paths
+
     def run(self, inputs: Mapping[str, Any], ctx: Any) -> OperatorResult:
-        circuit_ir = inputs.get("circuit_ir")
-        if not isinstance(circuit_ir, CircuitIR):
-            raise ValidationError("circuit_ir must be provided as a CircuitIR")
+        src = inputs.get("source")
+        if not isinstance(src, CircuitSource):
+            raise ValidationError("PatchApplyOperator: 'source' must be CircuitSource")
         param_space = inputs.get("param_space")
         if not isinstance(param_space, ParamSpace):
-            raise ValidationError("param_space must be provided as a ParamSpace")
+            raise ValidationError("PatchApplyOperator: 'param_space' must be ParamSpace")
         patch = inputs.get("patch")
         if not isinstance(patch, Patch):
-            raise ValidationError("patch must be provided as a Patch")
+            raise ValidationError("PatchApplyOperator: 'patch' must be Patch")
+
+        sig = topology_signature(src.text, include_paths=self._include_paths)
+        cir = sig.circuit_ir
 
         provenance = Provenance(operator=self.name, version=self.version)
-        provenance.inputs["circuit_ir"] = ArtifactFingerprint(
-            sha256=stable_hash_str(str(circuit_ir.param_locs))
-        )
+        provenance.inputs["source"] = src.fingerprint()
         provenance.inputs["param_space"] = ArtifactFingerprint(
-            sha256=stable_hash_str(str(tuple(p.param_id for p in param_space.params)))
+            sha256=stable_hash_json([p.param_id for p in param_space.params])
         )
         provenance.inputs["patch"] = patch.fingerprint()
 
-        validation = validate_patch(circuit_ir, param_space, patch)
+        validation = validate_patch(cir, param_space, patch)
         if not validation.ok:
             raise ValidationError("; ".join(validation.errors))
 
-        new_circuit_ir = apply_patch_with_topology_guard(circuit_ir, patch)
-        netlist_text = "\n".join(new_circuit_ir.lines)
+        patched_circuit_ir = apply_patch_with_topology_guard(
+            cir,
+            patch,
+            include_paths=self._include_paths,
+        )
+        netlist_text = "\n".join(patched_circuit_ir.lines)
+        refreshed = topology_signature(netlist_text, include_paths=self._include_paths)
+        new_circuit_ir = refreshed.circuit_ir
+        new_source = CircuitSource(
+            kind=src.kind,
+            text=netlist_text,
+            name=src.name,
+            metadata=dict(src.metadata),
+        )
 
         provenance.outputs["circuit_ir"] = ArtifactFingerprint(
-            sha256=stable_hash_str(str(new_circuit_ir.param_locs))
+            sha256=stable_hash_json(_param_locs_payload(new_circuit_ir.param_locs))
         )
         provenance.outputs["netlist_text"] = ArtifactFingerprint(
             sha256=stable_hash_str(netlist_text)
         )
+        provenance.outputs["source"] = new_source.fingerprint()
         provenance.finish()
 
         return OperatorResult(
             outputs={
+                "source": new_source,
                 "circuit_ir": new_circuit_ir,
-                "netlist_text": netlist_text,
+                "topology_signature": refreshed.signature,
             },
             provenance=provenance,
         )

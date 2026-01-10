@@ -3,22 +3,14 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 
 from ...contracts.artifacts import CircuitIR, Element, TokenLoc
+from .tokenize import tokenize_spice_line
+from .sanitize_rules import normalize_spice_lines
 
 
-def _merge_continuations(lines: List[str]) -> List[str]:
-    merged: List[str] = []
-    for line in lines:
-        stripped = line.lstrip()
-        if stripped.startswith("+"):
-            continuation = stripped.lstrip("+").strip()
-            if merged:
-                prev = merged.pop()
-                merged.append(f"{prev.rstrip()} {continuation}".strip())
-            elif continuation:
-                merged.append(continuation)
-            continue
-        merged.append(line)
-    return merged
+def _strip_inline_comment(line: str) -> str:
+    if ";" in line:
+        return line.split(";", 1)[0]
+    return line
 
 
 def _parse_param_token(token: str, line_idx: int, token_idx: int) -> TokenLoc | None:
@@ -43,13 +35,14 @@ def index_spice_netlist(netlist_text: str, includes: Tuple[str, ...] | None = No
 
     Expects sanitized text (control blocks removed, includes filtered) for consistency.
     """
-    lines = _merge_continuations(netlist_text.splitlines())
+    lines = normalize_spice_lines(netlist_text.splitlines())
     elements: Dict[str, Element] = {}
     param_locs: Dict[str, TokenLoc] = {}
     includes_list: List[str] = list(includes or [])
     warnings: List[str] = []
 
     for line_idx, line in enumerate(lines):
+        line = _strip_inline_comment(line)
         stripped = line.strip()
         if not stripped:
             continue
@@ -66,15 +59,32 @@ def index_spice_netlist(netlist_text: str, includes: Tuple[str, ...] | None = No
                 warnings.append(f"line {line_idx}: malformed include")
             continue
 
+        # .param definitions
+        if stripped.lower().startswith(".param"):
+            tokens = stripped.split()
+            for idx, tok in enumerate(tokens[1:], start=1):
+                loc = _parse_param_token(tok, line_idx=line_idx, token_idx=idx)
+                if loc:
+                    param_id = f"param.{loc.key.lower()}"
+                    param_locs[param_id] = TokenLoc(
+                        line_idx=loc.line_idx,
+                        token_idx=loc.token_idx,
+                        key=param_id,
+                        raw_token=loc.raw_token,
+                        value_span=loc.value_span,
+                    )
+            continue
+
         # Ignore other dot-directives for now
         if stripped.startswith("."):
             continue
 
-        tokens = stripped.split()
+        tokens, spans = tokenize_spice_line(stripped)
         if not tokens:
             continue
 
         name = tokens[0]
+        name_l = name.lower()
         kind = name[0].upper()
 
         if kind == "M":
@@ -84,12 +94,13 @@ def index_spice_netlist(netlist_text: str, includes: Tuple[str, ...] | None = No
             nodes = tuple(tokens[1:5])
             model = tokens[5]
             param_tokens = tokens[6:]
-            elem = Element(name=name, etype="MOS", nodes=nodes, model_or_subckt=model, line_idx=line_idx)
+            params: Dict[str, TokenLoc] = {}
             for idx, tok in enumerate(param_tokens, start=6):
                 loc = _parse_param_token(tok, line_idx=line_idx, token_idx=idx)
                 if loc:
-                    elem.params[loc.key] = loc
-                    param_locs[f"{name}.{loc.key}"] = loc
+                    params[loc.key] = loc
+                    param_locs[f"{name_l}.{loc.key}"] = loc
+            elem = Element(name=name, etype="MOS", nodes=nodes, model_or_subckt=model, line_idx=line_idx, params=params)
 
         elif kind in {"R", "C", "L", "V", "I"}:
             if len(tokens) < 3:
@@ -97,12 +108,28 @@ def index_spice_netlist(netlist_text: str, includes: Tuple[str, ...] | None = No
                 continue
             nodes = tuple(tokens[1:3])
             param_tokens = tokens[3:]
-            elem = Element(name=name, etype=kind, nodes=nodes, line_idx=line_idx)
-            for idx, tok in enumerate(param_tokens, start=3):
+            params: Dict[str, TokenLoc] = {}
+
+            if param_tokens:
+                first = param_tokens[0]
+                if "=" not in first:
+                    loc = TokenLoc(
+                        line_idx=line_idx,
+                        token_idx=3,
+                        key="value",
+                        raw_token=first,
+                        value_span=(0, len(first)),
+                    )
+                    params["value"] = loc
+                    param_locs[f"{name_l}.value"] = loc
+                    param_tokens = param_tokens[1:]
+
+            for idx, tok in enumerate(param_tokens, start=len(tokens) - len(param_tokens)):
                 loc = _parse_param_token(tok, line_idx=line_idx, token_idx=idx)
                 if loc:
-                    elem.params[loc.key] = loc
-                    param_locs[f"{name}.{loc.key}"] = loc
+                    params[loc.key] = loc
+                    param_locs[f"{name_l}.{loc.key}"] = loc
+            elem = Element(name=name, etype=kind, nodes=nodes, line_idx=line_idx, params=params)
 
         elif kind == "X":
             rest = tokens[1:]
@@ -117,12 +144,13 @@ def index_spice_netlist(netlist_text: str, includes: Tuple[str, ...] | None = No
                 continue
             subckt = non_param[-1]
             nodes = tuple(non_param[:-1])
-            elem = Element(name=name, etype="SUBCKT", nodes=nodes, model_or_subckt=subckt, line_idx=line_idx)
+            params: Dict[str, TokenLoc] = {}
             for idx, tok in enumerate(param_tokens, start=len(tokens) - len(param_tokens)):
                 loc = _parse_param_token(tok, line_idx=line_idx, token_idx=idx)
                 if loc:
-                    elem.params[loc.key] = loc
-                    param_locs[f"{name}.{loc.key}"] = loc
+                    params[loc.key] = loc
+                    param_locs[f"{name_l}.{loc.key}"] = loc
+            elem = Element(name=name, etype="SUBCKT", nodes=nodes, model_or_subckt=subckt, line_idx=line_idx, params=params)
 
         else:
             warnings.append(f"line {line_idx}: unsupported element '{name}'")

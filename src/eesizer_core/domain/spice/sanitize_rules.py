@@ -21,7 +21,8 @@ def _strip_control_blocks(netlist_text: str) -> str:
     return _CONTROL_BLOCK_PATTERN.sub("", netlist_text)
 
 
-def _normalize_continuations(lines: List[str]) -> List[str]:
+def normalize_spice_lines(lines: List[str]) -> List[str]:
+    """Merge continuation lines starting with '+' into previous line."""
     normalized: List[str] = []
     for line in lines:
         stripped = line.lstrip()
@@ -37,17 +38,19 @@ def _normalize_continuations(lines: List[str]) -> List[str]:
     return normalized
 
 
+def has_control_block(text: str) -> bool:
+    return bool(_CONTROL_BLOCK_PATTERN.search(text))
+
+
 def sanitize_spice_netlist(netlist_text: str, max_lines: int = 5000) -> SanitizeResult:
     """Strip unsafe constructs and return sanitized text, includes, and warnings."""
     warnings: List[str] = []
 
     text_no_ctrl = _strip_control_blocks(netlist_text)
-    lines = text_no_ctrl.splitlines()
+    lines = normalize_spice_lines(text_no_ctrl.splitlines())
 
     if len(lines) > max_lines:
         raise ValueError(f"netlist too large ({len(lines)} lines > {max_lines})")
-
-    lines = _normalize_continuations(lines)
 
     safe_lines: List[str] = []
     includes: List[str] = []

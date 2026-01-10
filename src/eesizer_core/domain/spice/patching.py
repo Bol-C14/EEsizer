@@ -1,32 +1,56 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 import re
 
-from ...contracts.artifacts import (
-    CircuitIR,
-    ParamSpace,
-    Patch,
-    PatchOp,
-    PatchOpType,
-    Scalar,
-    TokenLoc,
-)
+from ...contracts.artifacts import CircuitIR, ParamSpace, Patch, PatchOp, Scalar, TokenLoc
+from ...contracts.enums import PatchOpType
 from ...contracts.errors import ValidationError
 from .signature import topology_signature
+from .tokenize import tokenize_spice_line
+from .parse import index_spice_netlist
 
 
 @dataclass
 class PatchValidationResult:
     ok: bool
     errors: List[str]
+    ratio_errors: List[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.ratio_errors is None:
+            self.ratio_errors = []
+
+
+_UNIT_MULTIPLIERS = {
+    "f": 1e-15,
+    "p": 1e-12,
+    "n": 1e-9,
+    "u": 1e-6,
+    "m": 1e-3,
+    "k": 1e3,
+    "meg": 1e6,
+    "g": 1e9,
+    "t": 1e12,
+}
+
+
+def _current_param_value(cir: CircuitIR, param_id: str) -> Optional[str]:
+    loc = cir.param_locs.get(param_id.lower())
+    if loc is None:
+        return None
+    raw = loc.raw_token
+    start, end = loc.value_span
+    return raw[start:end]
 
 
 def validate_patch(
     cir: CircuitIR,
     param_space: ParamSpace,
     patch: Patch,
+    *,
+    wl_ratio_min: Optional[float] = None,
 ) -> PatchValidationResult:
     """
     检查 patch 是否：
@@ -36,15 +60,17 @@ def validate_patch(
     - (预留) 不违反上下界 / ratio 约束
     """
     errors: List[str] = []
+    candidate_values: Dict[str, float] = {}
 
     for op in patch.ops:
-        if not param_space.contains(op.param):
+        pid = op.param.lower()
+        if not param_space.contains(pid):
             errors.append(f"unknown param '{op.param}' (not in ParamSpace)")
             continue
-        if op.param not in cir.param_locs:
+        if pid not in cir.param_locs:
             errors.append(f"unknown param '{op.param}' (not in CircuitIR)")
             continue
-        param_def = param_space.get(op.param)
+        param_def = param_space.get(pid)
         if param_def is None:
             errors.append(f"unknown param '{op.param}' (ParamSpace lookup failed)")
             continue
@@ -52,10 +78,63 @@ def validate_patch(
             errors.append(f"param '{op.param}' is frozen")
         if op.op not in (PatchOpType.set, PatchOpType.add, PatchOpType.mul):
             errors.append(f"unsupported op '{op.op}' for param '{op.param}'")
+            continue
 
-        # TODO: check bounds/ratio when ParamDef constraints are active.
+        current_val_text = _current_param_value(cir, pid)
+        candidate_val: Optional[float] = None
+        if op.op == PatchOpType.set:
+            try:
+                candidate_val = _parse_scalar_numeric(op.value)
+            except ValidationError as exc:
+                errors.append(f"param '{op.param}' has non-numeric patch value '{op.value}'")
+                candidate_val = None
+        else:
+            if current_val_text is None:
+                errors.append(f"param '{op.param}' missing current value")
+                continue
+            try:
+                current_val = _parse_scalar_numeric(current_val_text)
+            except ValidationError:
+                errors.append(f"param '{op.param}' has non-numeric current value '{current_val_text}'")
+                continue
+            try:
+                delta = _parse_scalar_numeric(op.value)
+            except ValidationError:
+                errors.append(f"param '{op.param}' has non-numeric patch value '{op.value}'")
+                continue
+            if op.op == PatchOpType.add:
+                candidate_val = current_val + delta
+            elif op.op == PatchOpType.mul:
+                candidate_val = current_val * delta
 
-    return PatchValidationResult(ok=not errors, errors=errors)
+        if candidate_val is not None:
+            candidate_values[pid] = candidate_val
+            if param_def.lower is not None and candidate_val < param_def.lower:
+                errors.append(f"param '{op.param}' below lower bound {param_def.lower}")
+            if param_def.upper is not None and candidate_val > param_def.upper:
+                errors.append(f"param '{op.param}' above upper bound {param_def.upper}")
+
+    ratio_errors: List[str] = []
+    if wl_ratio_min is not None:
+        for elem_name, loc in cir.param_locs.items():
+            if ".w" in elem_name or ".l" in elem_name:
+                base = elem_name.split(".")[0]
+                w_id = f"{base}.w"
+                l_id = f"{base}.l"
+                if w_id in cir.param_locs and l_id in cir.param_locs:
+                    w_val = candidate_values.get(w_id)
+                    if w_val is None:
+                        w_text = _current_param_value(cir, w_id)
+                        w_val = _parse_scalar_numeric(w_text) if w_text is not None else None
+                    l_val = candidate_values.get(l_id)
+                    if l_val is None:
+                        l_text = _current_param_value(cir, l_id)
+                        l_val = _parse_scalar_numeric(l_text) if l_text is not None else None
+                    if w_val is not None and l_val is not None and w_val < wl_ratio_min * l_val:
+                        ratio_errors.append(f"{w_id} < {wl_ratio_min}*{l_id}")
+
+    all_errors = errors + ratio_errors
+    return PatchValidationResult(ok=not all_errors, errors=all_errors, ratio_errors=ratio_errors)
 
 
 def _parse_scalar_numeric(value: Scalar) -> float:
@@ -63,10 +142,18 @@ def _parse_scalar_numeric(value: Scalar) -> float:
         raise ValidationError("boolean values are not supported for numeric ops")
     if isinstance(value, (int, float)):
         return float(value)
-    try:
-        return float(str(value).strip())
-    except ValueError as exc:
-        raise ValidationError(f"non-numeric value '{value}' for numeric op") from exc
+    text = str(value).strip()
+    match = re.match(r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)([a-zA-Z]+)?$", text)
+    if not match:
+        raise ValidationError(f"non-numeric value '{value}' for numeric op")
+    number_str, suffix = match.groups()
+    base = float(number_str)
+    if not suffix:
+        return base
+    suffix_norm = suffix.lower()
+    if suffix_norm in _UNIT_MULTIPLIERS:
+        return base * _UNIT_MULTIPLIERS[suffix_norm]
+    raise ValidationError(f"unsupported unit suffix '{suffix}' in value '{value}'")
 
 
 def _format_scalar(value: Scalar) -> str:
@@ -76,11 +163,11 @@ def _format_scalar(value: Scalar) -> str:
 
 
 def _token_span_at_index(line: str, token_idx: int) -> Tuple[int, int, str]:
-    matches = list(re.finditer(r"\S+", line))
-    if token_idx < 0 or token_idx >= len(matches):
+    tokens, spans = tokenize_spice_line(line)
+    if token_idx < 0 or token_idx >= len(tokens):
         raise ValidationError(f"token_idx {token_idx} out of range for line '{line.strip()}'")
-    match = matches[token_idx]
-    return match.start(), match.end(), match.group(0)
+    start, end = spans[token_idx]
+    return start, end, tokens[token_idx]
 
 
 def _apply_single_op_to_lines(
@@ -96,14 +183,20 @@ def _apply_single_op_to_lines(
     """
     loc: TokenLoc | None = cir.param_locs.get(op.param)
     if loc is None:
+        loc = cir.param_locs.get(op.param.lower())
+    if loc is None:
         raise ValidationError(f"param '{op.param}' not found in CircuitIR")
 
     line = lines[loc.line_idx]
     token_start, token_end, token = _token_span_at_index(line, loc.token_idx)
-    start, end = loc.value_span
-    if start < 0 or end > len(token) or start > end:
-        raise ValidationError(f"invalid value_span for param '{op.param}'")
-
+    eq_pos = token.find("=")
+    if eq_pos >= 0:
+        start = eq_pos + 1
+        end = len(token)
+    else:
+        start, end = loc.value_span
+        if start < 0 or end > len(token) or start > end:
+            raise ValidationError(f"invalid value_span for param '{op.param}'")
     old_val_text = token[start:end]
     if op.op == PatchOpType.set:
         new_val_text = _format_scalar(op.value)
@@ -138,13 +231,8 @@ def apply_patch_to_ir(
     for op in patch.ops:
         _apply_single_op_to_lines(cir, lines, op)
 
-    return CircuitIR(
-        lines=tuple(lines),
-        elements=cir.elements,
-        param_locs=cir.param_locs,
-        includes=cir.includes,
-        warnings=cir.warnings,
-    )
+    netlist_text = "\n".join(lines)
+    return index_spice_netlist(netlist_text, includes=cir.includes)
 
 
 def apply_patch_with_topology_guard(
@@ -154,9 +242,23 @@ def apply_patch_with_topology_guard(
     include_paths: bool = True,
 ) -> CircuitIR:
     """应用 patch 并检查拓扑签名不变，否则抛 ValidationError."""
-    old_sig = topology_signature("\n".join(cir.lines), include_paths=include_paths).signature
+    old_sig_result = topology_signature("\n".join(cir.lines), include_paths=include_paths)
     new_cir = apply_patch_to_ir(cir, patch)
-    new_sig = topology_signature("\n".join(new_cir.lines), include_paths=include_paths).signature
-    if old_sig != new_sig:
-        raise ValidationError("Topology changed after patch")
+    new_sig_result = topology_signature("\n".join(new_cir.lines), include_paths=include_paths)
+    if old_sig_result.signature != new_sig_result.signature:
+        diff_parts = []
+        old_elems = set(old_sig_result.circuit_ir.elements.keys())
+        new_elems = set(new_sig_result.circuit_ir.elements.keys())
+        if old_elems != new_elems:
+            diff_parts.append(f"elements {old_elems ^ new_elems}")
+        old_params = set(old_sig_result.circuit_ir.param_locs.keys())
+        new_params = set(new_sig_result.circuit_ir.param_locs.keys())
+        if old_params != new_params:
+            diff_parts.append(f"params {old_params ^ new_params}")
+        old_inc = set(old_sig_result.circuit_ir.includes)
+        new_inc = set(new_sig_result.circuit_ir.includes)
+        if old_inc != new_inc:
+            diff_parts.append(f"includes {old_inc ^ new_inc}")
+        reason = "; ".join(diff_parts) if diff_parts else "topology signature mismatch"
+        raise ValidationError(f"Topology changed after patch: {reason}")
     return new_cir

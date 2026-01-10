@@ -16,6 +16,27 @@ def stable_hash_str(s: str) -> str:
     return stable_hash_bytes(s.encode("utf-8", errors="ignore"))
 
 
+def _to_jsonable(obj: Any) -> Any:
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, bytes):
+        return {"__bytes__": obj.hex()}
+    if isinstance(obj, tuple):
+        return [_to_jsonable(v) for v in obj]
+    if isinstance(obj, list):
+        return [_to_jsonable(v) for v in obj]
+    if isinstance(obj, dict):
+        return {str(k): _to_jsonable(v) for k, v in obj.items()}
+    return str(obj)
+
+
+def stable_hash_json(obj: Any) -> str:
+    """Stable hash using JSON with sorted keys and normalized containers."""
+    normalized = _to_jsonable(obj)
+    data = json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return stable_hash_bytes(data)
+
+
 @dataclass(frozen=True)
 class ArtifactFingerprint:
     """Stable identity for an artifact's content."""

@@ -4,7 +4,7 @@ from typing import Any, Mapping
 
 from ...contracts.errors import ValidationError
 from ...contracts.operators import Operator, OperatorResult
-from ...contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_str
+from ...contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_json, stable_hash_str
 from ...domain.spice import SanitizeResult, sanitize_spice_netlist
 
 
@@ -28,12 +28,12 @@ class SpiceSanitizeOperator(Operator):
 
         provenance = Provenance(operator=self.name, version=self.version)
         provenance.inputs["netlist_text"] = ArtifactFingerprint(sha256=stable_hash_str(netlist_text))
-        provenance.inputs["max_lines"] = ArtifactFingerprint(sha256=stable_hash_str(str(max_lines)))
+        provenance.inputs["max_lines"] = ArtifactFingerprint(sha256=stable_hash_json(max_lines))
 
         result: SanitizeResult = sanitize_spice_netlist(netlist_text, max_lines=max_lines)
 
         provenance.outputs["sanitized_text"] = ArtifactFingerprint(sha256=stable_hash_str(result.sanitized_text))
-        provenance.outputs["includes"] = ArtifactFingerprint(sha256=stable_hash_str(str(result.includes)))
+        provenance.outputs["includes"] = ArtifactFingerprint(sha256=stable_hash_json(result.includes))
         provenance.finish()
 
         return OperatorResult(

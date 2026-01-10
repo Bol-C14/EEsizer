@@ -5,7 +5,7 @@ from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 from .enums import SourceKind, SimKind, PatchOpType, StopReason
-from .provenance import ArtifactFingerprint, stable_hash_str
+from .provenance import ArtifactFingerprint, stable_hash_json, stable_hash_str
 
 
 Number = Union[int, float]
@@ -21,24 +21,31 @@ class TokenLoc:
     value_span: Tuple[int, int]  # slice within raw_token after '='
 
 
-@dataclass
+@dataclass(frozen=True)
 class Element:
     name: str
     etype: str
     nodes: Tuple[str, ...]
     model_or_subckt: Optional[str] = None
-    params: Dict[str, TokenLoc] = field(default_factory=dict)
+    params: Mapping[str, TokenLoc] = field(default_factory=lambda: MappingProxyType({}))
     line_idx: Optional[int] = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
 
-@dataclass
+
+@dataclass(frozen=True)
 class CircuitIR:
     lines: Tuple[str, ...]
-    elements: Dict[str, Element]
+    elements: Mapping[str, Element]
     # flattened param map: "M1.w" -> TokenLoc
-    param_locs: Dict[str, TokenLoc] = field(default_factory=dict)
+    param_locs: Mapping[str, TokenLoc] = field(default_factory=lambda: MappingProxyType({}))
     includes: Tuple[str, ...] = ()
     warnings: Tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "elements", MappingProxyType(dict(self.elements)))
+        object.__setattr__(self, "param_locs", MappingProxyType(dict(self.param_locs)))
 
 
 @dataclass(frozen=True)
@@ -131,7 +138,7 @@ class Patch:
             "stop": self.stop,
             "notes": self.notes,
         }
-        return ArtifactFingerprint(sha256=stable_hash_str(str(payload)))
+        return ArtifactFingerprint(sha256=stable_hash_json(payload))
 
 
 @dataclass(frozen=True)

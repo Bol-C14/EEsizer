@@ -4,8 +4,22 @@ from typing import Any, Mapping
 
 from ...contracts.errors import ValidationError
 from ...contracts.operators import Operator, OperatorResult
-from ...contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_str
+from ...contracts.artifacts import TokenLoc
+from ...contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_json, stable_hash_str
 from ...domain.spice import TopologySignatureResult, topology_signature
+
+
+def _param_locs_payload(param_locs: dict[str, TokenLoc]) -> dict[str, object]:
+    return {
+        name: {
+            "line_idx": loc.line_idx,
+            "token_idx": loc.token_idx,
+            "key": loc.key,
+            "raw_token": loc.raw_token,
+            "value_span": list(loc.value_span),
+        }
+        for name, loc in sorted(param_locs.items())
+    }
 
 
 class TopologySignatureOperator(Operator):
@@ -32,8 +46,8 @@ class TopologySignatureOperator(Operator):
 
         provenance = Provenance(operator=self.name, version=self.version)
         provenance.inputs["netlist_text"] = ArtifactFingerprint(sha256=stable_hash_str(netlist_text))
-        provenance.inputs["include_paths"] = ArtifactFingerprint(sha256=stable_hash_str(str(include_paths)))
-        provenance.inputs["max_lines"] = ArtifactFingerprint(sha256=stable_hash_str(str(max_lines)))
+        provenance.inputs["include_paths"] = ArtifactFingerprint(sha256=stable_hash_json(include_paths))
+        provenance.inputs["max_lines"] = ArtifactFingerprint(sha256=stable_hash_json(max_lines))
 
         result: TopologySignatureResult = topology_signature(
             netlist_text,
@@ -42,8 +56,12 @@ class TopologySignatureOperator(Operator):
         )
 
         provenance.outputs["signature"] = ArtifactFingerprint(sha256=stable_hash_str(result.signature))
-        provenance.outputs["circuit_ir"] = ArtifactFingerprint(sha256=stable_hash_str(str(result.circuit_ir.param_locs)))
-        provenance.outputs["includes"] = ArtifactFingerprint(sha256=stable_hash_str(str(result.sanitize_result.includes)))
+        provenance.outputs["circuit_ir"] = ArtifactFingerprint(
+            sha256=stable_hash_json(_param_locs_payload(result.circuit_ir.param_locs))
+        )
+        provenance.outputs["includes"] = ArtifactFingerprint(
+            sha256=stable_hash_json(result.sanitize_result.includes)
+        )
         provenance.finish()
 
         return OperatorResult(

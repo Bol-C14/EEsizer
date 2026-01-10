@@ -10,8 +10,8 @@ R1 d out 1k
     assert result.signature
     assert "M1" in result.circuit_ir.elements
     assert "R1" in result.circuit_ir.elements
-    assert "M1.w" in result.circuit_ir.param_locs
-    assert "M1.l" in result.circuit_ir.param_locs
+    assert "m1.w" in result.circuit_ir.param_locs
+    assert "m1.l" in result.circuit_ir.param_locs
 
 
 def test_signature_invariant_on_value_change():
