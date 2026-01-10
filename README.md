@@ -1,66 +1,394 @@
-# EEsizer (Structured Edition)
 
-LLM-assisted analog/mixed-signal sizing with deterministic orchestration, ngspice in-loop simulation, and per-run isolation.
+# EEsizer (Bol-C14/EEsizer)
 
-## What’s Inside
-- **agent_test_gpt/** modular code:
-  - `agent_gpt_openai.py` — entrypoint with `run_agent(user_question, user_netlist, run_dir=None)`.
-  - `llm_client.py` — env-configurable models/temperature; structured logging.
-  - `toolchain.py` — tool-call parsing/validation (allowlist + ordering).
-  - `simulation_utils.py` — netlist munging, simulation builders, metrics (per-run output dirs).
-  - `optimization.py` — LLM + simulation loop with retries/backoff.
-  - `reporting.py` — guarded plotting and netlist copying.
-  - `config.py` — path roots (project/package/resources/output).
-  - `logging_utils.py` — structured logging + per-run log files.
-  - `resources/ptm_*.txt` — model cards.
-- **tests/**: coverage for prompts, tool parsing/validation, reporting guards, optimization runner (mocked), LLM client config.
-- **docs/**: code review, change log.
+EEsizer is a **modular, operator-driven framework** for analog / mixed-signal circuit processing and optimization, designed to support:
 
-## Requirements
-- Python 3.12+
-- ngspice installed and on PATH (or `NGSPICE_PATH` set) for real simulations.
-- OpenAI-compatible LLM access (or mock).
+* **Safe, auditable netlist transformations**
+* **Deterministic simulation/metrics pipelines**
+* **Policy-driven optimization loops** (LLM, RL, Bayesian optimization, heuristics)
+* Future integration into a broader **Unified Circuit Processor** ecosystem (node transfer, verification copilot workflows, etc.)
 
-## Quickstart
+> **Key design principle:**
+> LLMs (and any “policy”) should **not** directly rewrite netlists.
+> They should propose **parameter-only patches** (deltas), which are then applied by strict, deterministic, guard-railed local logic.
+
+---
+
+## Project Status
+
+This repository has been refactored from a legacy notebook-based codebase into a maintainable package:
+
+* ✅ **Step 1:** Contracts layer (Artifacts / Operators / Policy / Strategy / Errors / Provenance)
+* ✅ **Step 2:** SPICE netlist canonicalization + lightweight IR + topology signature guard
+* 🚧 **Step 3 (current target):** Patch substrate (policy outputs `Patch`, framework validates and applies safely)
+
+> The `legacy/` directory contains old code and references.
+> New development happens in `src/eesizer_core/`.
+
+---
+
+## Why this architecture?
+
+In research groups and multi-tool environments, the main pain points are:
+
+* repeated “glue” adapters everywhere
+* unclear boundaries between parsing, simulation, optimization, reporting
+* code that works once but becomes impossible to extend safely (especially with LLM agents)
+
+EEsizer solves this by enforcing:
+
+* **A unified artifact model** (`CircuitSource`, `CircuitIR`, `ParamSpace`, `Patch`, etc.)
+* **Composable operators** with consistent `run(inputs, ctx) -> outputs`
+* **Strict guards** (topology signature + schema invariants)
+* **Auditable provenance** (fingerprints, warnings, run metadata)
+
+---
+
+## Repository Layout
+
+```
+.
+├── src/
+│   └── eesizer_core/
+│       ├── contracts/            # Stable “public” contracts (types + protocols)
+│       │   ├── artifacts.py
+│       │   ├── operators.py
+│       │   ├── policy.py
+│       │   ├── strategy.py
+│       │   ├── errors.py
+│       │   ├── enums.py
+│       │   └── provenance.py
+│       ├── domain/
+│       │   └── spice/            # Pure functions for SPICE netlists (no side-effects)
+│       │       ├── sanitize_rules.py
+│       │       ├── parse.py
+│       │       └── signature.py
+│       ├── operators/
+│       │   └── netlist/          # Operator wrappers: sanitize/index/signature (+ patch in Step3)
+│       │       ├── sanitize_operator.py
+│       │       ├── index_operator.py
+│       │       └── signature_operator.py
+│       └── runtime/              # Runtime context, run ids, shared execution utilities
+│           └── context.py
+├── tests/                        # Pytest suite (contracts + spice domain + operators)
+├── examples/                     # Minimal runnable examples / demos
+├── legacy/                       # Legacy implementation (read-only reference)
+├── pyproject.toml                # Packaging and dependencies
+└── README.md
+```
+
+---
+
+## Core Concepts (Quick Mental Model)
+
+### Artifacts (Data)
+
+Artifacts are *typed containers of information* that flow through the system.
+
+Minimal set (already implemented):
+
+* `CircuitSource`: raw netlist text + metadata
+* `CircuitIR`: lightweight parsed representation (elements, nodes, token locations)
+* `ParamSpace`: whitelist of controllable parameters
+* `Patch`: parameter-only delta operations (set/add/mul)
+* `SimPlan`: requested simulations (planned for later stages)
+* `RunResult`: summary outputs + metrics + logs + provenance (later stages)
+
+### Operators (Functions with contract)
+
+Operators are composable building blocks:
+
+```text
+Operator.run(inputs, ctx) -> outputs
+```
+
+Operators should be:
+
+* deterministic if possible
+* auditable (provenance)
+* side-effect-free unless explicitly stated (e.g., running ngspice later)
+
+### Policy (Proposer)
+
+Policy proposes “what to do next”:
+
+* LLM policy
+* RL policy
+* Bayesian optimization policy
+* heuristic policy
+
+```text
+Policy.propose(observation, ctx) -> Patch
+```
+
+### Strategy (Orchestrator)
+
+Strategy runs a loop by composing operators and policies:
+
+* canonicalize netlist
+* apply patch
+* simulate
+* compute metrics
+* stop conditions
+
+```text
+Strategy.run(spec, source, ctx, cfg) -> RunResult
+```
+
+---
+
+## Getting Started
+
+### 1) Requirements
+
+* Python 3.10+ recommended (3.11 works well)
+* (Optional, future) ngspice for simulation stage
+
+### 2) Create a virtual environment
+
 ```bash
-export OPENAI_API_KEY=...
-export LLM_MODEL=gpt-4.1           # optional override
-export LLM_FUNCTION_MODEL=gpt-4.1  # optional override
-export LLM_TEMPERATURE=1           # optional override
-export LOG_LEVEL=INFO              # DEBUG/INFO/WARNING/ERROR/CRITICAL
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 ```
 
-```python
-from agent_test_gpt.agent_gpt_openai import run_agent
+### 3) Install EEsizer in editable mode (with dev deps)
 
-user_question = "Optimize this op-amp for >65dB gain, PM>60deg, power<5mW."
-with open("initial_circuit_netlist/complementary_classAB_opamp.cir") as f:
-    netlist = f.read()
+From repository root:
 
-results = run_agent(user_question, netlist)  # creates a per-run folder under output/runs/
-print(results)
-```
-
-Outputs per run:
-- `output/runs/<uuid>/`: netlist snapshots, metrics CSV, plots, logs (`logs/agent.log`), `run_manifest.json`.
-
-## Testing
 ```bash
-PYTHONPATH=. pytest
+pip install -e ".[dev]"
 ```
 
-## Configuration Highlights
-- Models/temperature via env: `LLM_MODEL`, `LLM_FUNCTION_MODEL`, `LLM_TEMPERATURE`.
-- Logging: `LOG_LEVEL` and per-run file logging (`logs/agent.log`); set `NGSPICE_LOG_TO_AGENT=0` to skip appending NGspice stdout/stderr.
-- Paths resolved relative to project root; PTM files under `agent_test_gpt/resources/`.
+### 4) Run tests
 
-## Safety & Validation
-- Tool-call allowlist and ordering checks.
-- Netlist sanitization strips `.control`/unsafe includes; per-run output dirs prevent collisions.
-- Simulation parsing asserts data presence; reporting validates CSVs/columns before plotting.
-- LLM calls have configurable retries/backoff (`OptimizationConfig`).
+```bash
+pytest -q
+```
 
-## Roadmap
-- Finer-grained simulation modules.
-- Schema enforcement for LLM I/O.
-- Artifact manifest expansion (prompts/responses) for reproducibility.
+> If you see `ModuleNotFoundError: eesizer_core`, it means the package is not installed in editable mode.
+> Fix: `pip install -e ".[dev]"` and rerun `pytest`.
+
+---
+
+## Dev Container (Recommended)
+
+We support a VSCode Dev Container workflow to avoid environment drift across team members.
+
+1. Install:
+
+* VSCode
+* “Dev Containers” extension
+* Docker Desktop / Docker Engine
+
+2. Open repository in VSCode
+3. Run: **Dev Containers: Reopen in Container**
+
+After container builds, dependencies will install automatically via `postCreateCommand`. If you need to rerun manually:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+---
+
+## Usage: Canonicalize + Index + Signature (Step 2)
+
+### What Step 2 provides
+
+* **Sanitization**: remove `.control` blocks, restrict `.include` paths (fail-closed for dangerous includes)
+* **Indexing**: build a lightweight IR that can locate editable tokens precisely
+* **Topology Signature**: a stable fingerprint that changes when and only when **structure** changes
+
+### Canonical netlist pipeline
+
+Typical pipeline (operator layer):
+
+1. `SpiceSanitizeOperator`
+2. `IndexSpiceOperator`
+3. `TopologySignatureOperator`
+
+This ordering is enforced to prevent inconsistent IR/signature generation.
+
+---
+
+## Step 3 Target: Patch Substrate (Parameter-only Editing)
+
+### Motivation
+
+Legacy EEsizer allowed the LLM to rewrite an entire netlist, which can accidentally:
+
+* break topology
+* change circuit function
+* introduce illegal syntax or unwanted components
+
+We instead enforce:
+
+> The LLM returns only a `Patch` that says “which parameters to change and how”.
+> The framework validates and applies it **deterministically** with strict constraints.
+
+### Patch Contract (planned/being implemented)
+
+A `Patch` is a list of operations:
+
+* `param`: `"m1.w"` (must exist in `ParamSpace` and `CircuitIR.param_locs`)
+* `op`: `"set" | "add" | "mul"`
+* `value`: numeric literal (float/int) or engineering form `"180n"`, `"2u"`, `"1e-6"`
+* `why`: optional explanation (recommended for audits)
+
+**Hard rules**
+
+* No netlist rewriting by policy
+* No new elements
+* No node changes
+* Apply must preserve topology signature & schema
+
+---
+
+## Safety & Correctness Guards
+
+We treat these as non-negotiable invariants:
+
+1. **Topology Invariant Guard**
+
+* signature before == signature after
+
+2. **Schema Invariant Guard**
+
+* set of `(element.param_keys)` and `param_locs` must not change
+
+3. **Fail-Closed Input Rules**
+
+* dangerous include paths rejected
+* `.control` blocks removed
+* indexing rejects non-sanitized input (to avoid parsing junk)
+
+---
+
+## Provenance & Reproducibility
+
+The framework includes:
+
+* `ArtifactFingerprint`: stable hash for artifact identity
+* `Provenance`: operator-level trace of transformations
+* `RunContext`: run id / seed / notes (foundation for experiment tracking)
+
+Guiding rule:
+
+> Any result should be reproducible from:
+> netlist text + patch JSON + tool versions + seed.
+
+---
+
+## How to Extend the Framework
+
+### Add a new Operator
+
+1. Create a new module under `src/eesizer_core/operators/...`
+2. Implement the `Operator` protocol:
+
+   * validate inputs
+   * call domain pure functions
+   * return outputs + provenance
+3. Add tests in `tests/`
+
+### Add a new Domain Rule (SPICE)
+
+Keep domain logic in `src/eesizer_core/domain/spice/`:
+
+* no file IO
+* no network
+* deterministic if possible
+* provide small focused functions
+
+### Add a new Policy (LLM/RL/Heuristic)
+
+Add to `src/eesizer_core/policies/` (or similar; not yet standardized):
+
+* must output `Patch`
+* must not modify netlist text
+* keep prompts/LLM client isolated from domain logic
+
+---
+
+## Testing Guidelines
+
+We use `pytest`.
+
+Recommended test categories:
+
+* `test_spice_sanitize.py`: sanitization correctness + include restrictions
+* `test_spice_index.py`: parsing + param locations stable
+* `test_ir_signature.py`: signature invariants
+* (Step 3) `test_patch_validate.py`: constraints and fail-closed behavior
+* (Step 3) `test_patch_apply.py`: deterministic patch application + guards
+
+---
+
+## Common Troubleshooting
+
+### `ModuleNotFoundError: eesizer_core`
+
+Fix:
+
+```bash
+pip install -e .
+pytest
+```
+
+### `.include` is removed or warned
+
+This is intentional. We restrict include paths to avoid unsafe/irreproducible netlist execution.
+If you need includes, use controlled relative paths and avoid `..` and absolute paths.
+
+### Signature changes unexpectedly
+
+* check if you changed nodes / element names / models / param keys
+* note: signature intentionally ignores numeric values but is sensitive to structure
+
+---
+
+## Roadmap (Short)
+
+* Step 3: Patch substrate
+
+  * Patch JSON schema + parsing
+  * Patch validation constraints (bounds/frozen/step limits)
+  * Deterministic apply using TokenLoc spans
+  * Guards: signature + schema invariants
+
+* Step 4+: Simulation and optimization loop
+
+  * ngspice operator
+  * metrics registry
+  * strategy loop (stop conditions, budgets)
+  * multi-agent orchestration (policy selection + tool calling)
+  * integration toward node transfer workflows
+
+---
+
+## Contributing (Team Workflow)
+
+* Keep `legacy/` read-only
+* Add new functionality under `src/eesizer_core/`
+* Every new operator/domain rule must have tests
+* Prefer small PRs:
+
+  * one invariant / one operator / one test suite at a time
+
+---
+
+## License / Citation
+
+* License: (add your license here)
+* Citation: (optional, add paper/project citation)
+
+---
+
+## Contact / Maintainers
+
+* Maintained by the Bol-C14 research workflow team.
+* Repository: Bol-C14/EEsizer
+
+---

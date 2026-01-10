@@ -26,6 +26,7 @@
 
 ### Operator patch apply
 - Updated `PatchApplyOperator` in `src/eesizer_core/operators/netlist/patch_apply.py` to consume `CircuitSource` + `ParamSpace` + `Patch` and emit new `CircuitSource`, refreshed `CircuitIR`, and topology signature.
+- Added `SpiceCanonicalizeOperator` to wrap sanitize+index+signature into a single canonicalizing step for strategies.
 
 ### Tests
 - Added `tests/test_step3_patch_domain.py` covering:

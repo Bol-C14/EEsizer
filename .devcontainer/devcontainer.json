@@ -16,8 +16,8 @@
     }
   },
 
-  // 如果你已经在 Dockerfile 里装好了 jupyter/ipykernel，可以把这个删掉或简化
-  "postCreateCommand": "",
+  // 自动安装本地包（含 dev 依赖），确保 pytest/import 开箱即用
+  "postCreateCommand": "pip install -e .[dev]",
 
   "containerEnv": {
     "PYTHONUNBUFFERED": "1"
