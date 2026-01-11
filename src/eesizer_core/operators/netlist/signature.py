@@ -69,7 +69,7 @@ class TopologySignatureOperator(Operator):
                 "signature": result.signature,
                 "circuit_ir": result.circuit_ir,
                 "includes": result.sanitize_result.includes,
-                "warnings": result.sanitize_result.warnings + result.circuit_ir.warnings,
+                "signature_result": result,
             },
             provenance=provenance,
             warnings=list(result.sanitize_result.warnings) + list(result.circuit_ir.warnings),

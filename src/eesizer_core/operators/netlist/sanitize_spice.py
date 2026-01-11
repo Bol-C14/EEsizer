@@ -40,7 +40,7 @@ class SpiceSanitizeOperator(Operator):
             outputs={
                 "sanitized_text": result.sanitized_text,
                 "includes": result.includes,
-                "warnings": result.warnings,
+                "sanitize_result": result,
             },
             provenance=provenance,
             warnings=list(result.warnings),
