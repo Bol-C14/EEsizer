@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from eesizer_core.contracts import SimPlan, SimRequest
+from eesizer_core.contracts import SimPlan, SimRequest, CircuitSource, SourceKind
 from eesizer_core.contracts.errors import ValidationError
 from eesizer_core.contracts.enums import SimKind
 from eesizer_core.sim import DeckBuildOperator
@@ -93,7 +93,10 @@ def test_deck_builder_preserves_base_dir():
     netlist = "V1 in 0 1\nR1 in out 1k\n.end\n"
     plan = SimPlan(sims=(SimRequest(kind=SimKind.ac, params={"output_nodes": ["out"]}),))
     base_dir = Path("/tmp/mycircuits")
-    deck = DeckBuildOperator().run({"netlist_text": netlist, "sim_plan": plan, "base_dir": base_dir}, ctx=None).outputs[
-        "deck"
-    ]
+    circuit_source = CircuitSource(
+        kind=SourceKind.spice_netlist,
+        text=netlist,
+        metadata={"base_dir": base_dir},
+    )
+    deck = DeckBuildOperator().run({"circuit_source": circuit_source, "sim_plan": plan}, ctx=None).outputs["deck"]
     assert deck.workdir == base_dir

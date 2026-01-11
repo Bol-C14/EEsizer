@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from ..contracts.artifacts import SimPlan, SimRequest, CircuitIR
-from ..contracts.enums import SimKind
+from ..contracts.artifacts import SimPlan, SimRequest, CircuitIR, CircuitSource
+from ..contracts.enums import SimKind, SourceKind
 from ..contracts.errors import ValidationError
 from ..contracts.operators import Operator, OperatorResult
 from ..contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_json, stable_hash_str
@@ -177,8 +177,17 @@ class DeckBuildOperator(Operator):
         base_dir = inputs.get("base_dir")
         bundle = inputs.get("netlist_bundle")
         circuit_ir = inputs.get("circuit_ir")
+        circuit_source = inputs.get("circuit_source")
 
-        if bundle is not None:
+        if circuit_source is not None:
+            if not isinstance(circuit_source, CircuitSource):
+                raise ValidationError("circuit_source must be a CircuitSource")
+            if circuit_source.kind != SourceKind.spice_netlist:
+                raise ValidationError("circuit_source must be a SPICE netlist")
+            netlist_text = circuit_source.text
+            md = circuit_source.metadata or {}
+            base_dir = md.get("base_dir", base_dir)
+        elif bundle is not None:
             if not isinstance(bundle, NetlistBundle):
                 raise ValidationError("netlist_bundle must be a NetlistBundle")
             netlist_text = bundle.text
