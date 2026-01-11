@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from types import MappingProxyType
+from typing import Mapping, MutableMapping
+
+from ..contracts.enums import SimKind
+
+
+@dataclass(frozen=True)
+class SpiceDeck:
+    """Deck materialized for a single ngspice analysis."""
+
+    text: str
+    kind: SimKind
+    # Mapping of logical name -> relative output file path expected from this deck.
+    expected_outputs: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "expected_outputs", MappingProxyType(dict(self.expected_outputs)))
+
+
+@dataclass
+class RawSimData:
+    """Filesystem-backed record of an ngspice run."""
+
+    kind: SimKind
+    run_dir: Path
+    outputs: MutableMapping[str, Path]
+    log_path: Path
+    cmdline: list[str]
+    returncode: int
+    stdout_tail: str = ""
+    stderr_tail: str = ""
+
+    def __post_init__(self) -> None:
+        self.run_dir = Path(self.run_dir)
+        self.log_path = Path(self.log_path)
+        self.outputs = {name: Path(path) for name, path in dict(self.outputs).items()}
+        self.cmdline = list(self.cmdline)
+
+    def output_path(self, name: str) -> Path:
+        """Helper to fetch an output path by logical name."""
+        return self.outputs[name]

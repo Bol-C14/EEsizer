@@ -67,11 +67,14 @@ run_container() {
 
   # 有附加命令就执行，没有就进 bash
   if [[ $# -gt 0 ]]; then
+    local user_cmd
+    user_cmd="$(printf '%q ' "$@")"
+    user_cmd="${user_cmd% }"
     docker run --rm -it \
       --name "${CONTAINER_NAME}" \
       -v "${PROJECT_ROOT}:${WORKDIR}" \
       -w "${WORKDIR}" \
-      "${IMAGE_NAME}" "$@"
+      "${IMAGE_NAME}" bash -lc "python -c 'import eesizer_core' >/dev/null 2>&1 || pip install -e '.[dev]'; ${user_cmd}"
   else
     docker run --rm -it \
       --name "${CONTAINER_NAME}" \
