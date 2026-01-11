@@ -32,6 +32,21 @@ def _normalize_expected_outputs(expected: Mapping[str, str]) -> dict[str, str]:
     return normalized
 
 
+def _resolve_output_path(rel_path: str, stage_dir: Path) -> Path:
+    rel = Path(rel_path)
+    if rel.is_absolute():
+        raise ValidationError(f"expected_outputs path must be relative: {rel_path}")
+    if any(part == ".." for part in rel.parts):
+        raise ValidationError(f"expected_outputs path must not traverse directories: {rel_path}")
+    abs_path = (stage_dir / rel).resolve()
+    stage_root = stage_dir.resolve()
+    try:
+        abs_path.relative_to(stage_root)
+    except ValueError as exc:
+        raise ValidationError(f"expected_outputs path escapes stage_dir: {rel_path}") from exc
+    return abs_path
+
+
 class NgspiceRunOperator(Operator):
     """Run ngspice in batch mode given a prepared deck."""
 
@@ -48,12 +63,12 @@ class NgspiceRunOperator(Operator):
         self.timeout_s = timeout_s
         self.fail_on_nonzero_returncode = fail_on_nonzero_returncode
 
-    def _write_deck(self, deck: SpiceDeck, stage_dir: Path) -> Path:
+    def _write_deck(self, deck: SpiceDeck, stage_dir: Path, resolved_outputs: Mapping[str, Path]) -> Path:
         deck_path = stage_dir / f"deck_{deck.kind.value}.sp"
         deck_text = deck.text
         # Ensure wrdata targets land in stage_dir even if ngspice cwd differs.
-        for rel_path in deck.expected_outputs.values():
-            abs_path = stage_dir / rel_path
+        for key, rel_path in deck.expected_outputs.items():
+            abs_path = resolved_outputs.get(key, stage_dir / rel_path)
             placeholder = f"{OUTPUT_PLACEHOLDER}/{rel_path}"
             if placeholder in deck_text:
                 deck_text = deck_text.replace(placeholder, str(abs_path))
@@ -96,7 +111,11 @@ class NgspiceRunOperator(Operator):
         stage_dir = ctx.run_dir() / stage_name
         stage_dir.mkdir(parents=True, exist_ok=True)
 
-        deck_path = self._write_deck(deck, stage_dir)
+        resolved_outputs: dict[str, Path] = {}
+        for key, rel_path in expected_outputs.items():
+            resolved_outputs[key] = _resolve_output_path(rel_path, stage_dir)
+
+        deck_path = self._write_deck(deck, stage_dir, resolved_outputs)
         log_path = self._log_path(deck, stage_dir)
 
         cmd = [self.ngspice_bin, "-b", "-o", str(log_path), str(deck_path)]
@@ -129,8 +148,8 @@ class NgspiceRunOperator(Operator):
             )
 
         outputs: dict[str, Path] = {}
-        for key, rel_path in expected_outputs.items():
-            out_path = stage_dir / rel_path
+        for key, abs_path in resolved_outputs.items():
+            out_path = abs_path
             if not out_path.exists():
                 raise SimulationError(f"Expected output '{key}' not found at {out_path}")
             outputs[key] = out_path

@@ -3,6 +3,7 @@ import subprocess
 import pytest
 
 from eesizer_core.contracts.enums import SimKind
+from eesizer_core.contracts.errors import ValidationError
 from eesizer_core.runtime.context import RunContext
 from eesizer_core.sim import NgspiceRunOperator, SpiceDeck
 from eesizer_core.contracts.errors import SimulationError
@@ -58,7 +59,7 @@ wrdata __OUT__/ac.csv frequency real(v(out)) imag(v(out))
     op = NgspiceRunOperator(ngspice_bin="ngspice")
     stage_dir = ctx.run_dir() / "stage"
     stage_dir.mkdir(parents=True, exist_ok=True)
-    deck_path = op._write_deck(deck, stage_dir)
+    deck_path = op._write_deck(deck, stage_dir, {"ac_csv": stage_dir / "ac.csv"})
     content = deck_path.read_text(encoding="utf-8")
     assert "__OUT__" not in content
     assert str((ctx.run_dir() / "stage" / "ac.csv")) in content
@@ -111,4 +112,14 @@ def test_ngspice_runner_nonzero_returncode(monkeypatch, tmp_path):
 
     op = NgspiceRunOperator()
     with pytest.raises(SimulationError, match="exited with code 1"):
+        op.run({"deck": deck}, ctx)
+
+
+def test_ngspice_runner_rejects_traversal_outputs(tmp_path):
+    workspace = tmp_path / "output"
+    ctx = RunContext(workspace_root=workspace)
+    deck = SpiceDeck(text="* test\n.end\n", kind=SimKind.ac, expected_outputs={"ac_csv": "../ac.csv"})
+
+    op = NgspiceRunOperator()
+    with pytest.raises(ValidationError):
         op.run({"deck": deck}, ctx)
