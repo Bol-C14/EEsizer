@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Tuple
 
 import numpy as np
@@ -10,28 +9,7 @@ from ..contracts.errors import MetricError, ValidationError
 from ..contracts.enums import SimKind
 from ..sim.artifacts import RawSimData
 from .registry import MetricSpec
-
-
-def _require_output(raw: RawSimData, name: str) -> Path:
-    if name not in raw.outputs:
-        raise ValidationError(f"RawSimData missing required output '{name}'")
-    return raw.outputs[name]
-
-
-def _load_ac_dataframe(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise MetricError(f"AC data file not found: {path}")
-    df = pd.read_csv(path, comment="*", sep=r"\s+")
-    df.columns = [c.strip() for c in df.columns]
-    return df
-
-
-def _pick_column(df: pd.DataFrame, target: str) -> pd.Series:
-    target_lower = target.lower()
-    for col in df.columns:
-        if col.lower() == target_lower:
-            return df[col]
-    raise MetricError(f"Column '{target}' not found in AC data; available: {df.columns.tolist()}")
+from .io import load_wrdata_table
 
 
 def _interp_at(freq: np.ndarray, values: np.ndarray, target: float) -> float:
@@ -64,10 +42,21 @@ def _first_crossing_from_above(freq: np.ndarray, values: np.ndarray, target: flo
 def _extract_ac(raw: RawSimData, spec: MetricSpec) -> Tuple[np.ndarray, np.ndarray]:
     if raw.kind != SimKind.ac:
         raise ValidationError(f"AC metric '{spec.name}' requires SimKind.ac data")
-    ac_path = _require_output(raw, "ac_csv")
-    df = _load_ac_dataframe(ac_path)
-    freq = _pick_column(df, "frequency").to_numpy(dtype=float)
     node = str(spec.params.get("node", "out"))
+    expected_cols = ["frequency", f"vdb({node})", f"vp({node})"]
+    ac_path = raw.outputs.get("ac_csv")
+    if ac_path is None:
+        raise ValidationError("RawSimData missing required output 'ac_csv'")
+    df = load_wrdata_table(ac_path, expected_columns=expected_cols)
+
+    def _pick_column(df: pd.DataFrame, target: str) -> pd.Series:
+        target_lower = target.lower()
+        for col in df.columns:
+            if col.lower() == target_lower:
+                return df[col]
+        raise MetricError(f"Column '{target}' not found in AC data; available: {df.columns.tolist()}")
+
+    freq = _pick_column(df, "frequency").to_numpy(dtype=float)
     mag_db_col = _pick_column(df, f"vdb({node})").to_numpy(dtype=float)
     return freq, mag_db_col
 
