@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
 
-from ..contracts.artifacts import SimPlan
+from ..contracts.artifacts import SimPlan, SimRequest
 from ..contracts.enums import SimKind
 from ..contracts.errors import ValidationError
 from ..contracts.operators import Operator, OperatorResult
@@ -53,7 +53,7 @@ def _inject_control_block(netlist_text: str, control_lines: Sequence[str]) -> st
 
 
 class DeckBuildOperator(Operator):
-    """Build a SpiceDeck by injecting a .control block for AC analysis."""
+    """Build a SpiceDeck by injecting a .control block for ac/dc/tran analyses."""
 
     name = "deck_build"
     version = "0.1.0"
@@ -63,10 +63,24 @@ class DeckBuildOperator(Operator):
         default_points_per_decade: int = 10,
         default_start_hz: float = 1.0,
         default_stop_hz: float = 1e6,
+        default_dc_source: str = "V1",
+        default_dc_start: float = 0.0,
+        default_dc_stop: float = 1.0,
+        default_dc_step: float = 0.1,
+        default_dc_sweep_node: str = "in",
+        default_tran_step: float = 1e-6,
+        default_tran_stop: float = 1e-3,
     ) -> None:
         self.default_points_per_decade = default_points_per_decade
         self.default_start_hz = default_start_hz
         self.default_stop_hz = default_stop_hz
+        self.default_dc_source = default_dc_source
+        self.default_dc_start = default_dc_start
+        self.default_dc_stop = default_dc_stop
+        self.default_dc_step = default_dc_step
+        self.default_dc_sweep_node = default_dc_sweep_node
+        self.default_tran_step = default_tran_step
+        self.default_tran_stop = default_tran_stop
 
     def _build_ac_control(self, params: Mapping[str, Any]) -> tuple[list[str], tuple[str, ...]]:
         p_per_dec = params.get("points_per_decade", self.default_points_per_decade)
@@ -89,7 +103,7 @@ class DeckBuildOperator(Operator):
             "quit",
             ".endc",
         ]
-        return control_lines, output_nodes
+        return control_lines, output_nodes, {"ac_csv": "ac.csv"}
 
     @staticmethod
     def _ac_columns(nodes: tuple[str, ...]) -> list[str]:
@@ -98,6 +112,55 @@ class DeckBuildOperator(Operator):
             cols.append(f"vdb({node})")
             cols.append(f"vp({node})")
         return cols
+
+    def _build_dc_control(self, params: Mapping[str, Any]) -> tuple[list[str], tuple[str, ...], dict[str, str]]:
+        source = params.get("sweep_source", self.default_dc_source)
+        sweep_node = params.get("sweep_node", self.default_dc_sweep_node)
+        start = params.get("start", self.default_dc_start)
+        stop = params.get("stop", self.default_dc_stop)
+        step = params.get("step", self.default_dc_step)
+        output_nodes = _normalize_output_nodes(params.get("output_nodes"))
+
+        if not isinstance(source, str) or not source:
+            raise ValidationError("sweep_source must be a non-empty string")
+
+        control_lines = [
+            ".control",
+            "set filetype=ascii",
+            f"dc {source} {_format_value(start)} {_format_value(stop)} {_format_value(step)}",
+            f"wrdata dc.csv v({sweep_node}) {' '.join(f'v({n})' for n in output_nodes)}",
+            "quit",
+            ".endc",
+        ]
+        return control_lines, output_nodes, {"dc_csv": "dc.csv"}
+
+    def _build_tran_control(self, params: Mapping[str, Any]) -> tuple[list[str], tuple[str, ...], dict[str, str]]:
+        step = params.get("step", self.default_tran_step)
+        stop = params.get("stop", self.default_tran_stop)
+        output_nodes = _normalize_output_nodes(params.get("output_nodes"))
+
+        control_lines = [
+            ".control",
+            "set filetype=ascii",
+            f"tran {_format_value(step)} {_format_value(stop)}",
+            f"wrdata tran.csv time {' '.join(f'v({n})' for n in output_nodes)}",
+            "quit",
+            ".endc",
+        ]
+        return control_lines, output_nodes, {"tran_csv": "tran.csv"}
+
+    @staticmethod
+    def _select_sim(sim_plan: SimPlan, sim_kind: SimKind | None) -> tuple[SimRequest, SimKind]:
+        if sim_kind is not None:
+            for s in sim_plan.sims:
+                if s.kind == sim_kind:
+                    return s, sim_kind
+            raise ValidationError(f"sim_plan does not include requested SimKind '{sim_kind.value}'")
+
+        if not sim_plan.sims:
+            raise ValidationError("sim_plan must include at least one SimRequest")
+        req = sim_plan.sims[0]
+        return req, req.kind
 
     def run(self, inputs: Mapping[str, Any], ctx: Any) -> OperatorResult:
         netlist_text = inputs.get("netlist_text")
@@ -110,17 +173,27 @@ class DeckBuildOperator(Operator):
         if not isinstance(sim_plan, SimPlan):
             raise ValidationError("sim_plan must be provided as a SimPlan")
 
-        ac_req = next((s for s in sim_plan.sims if s.kind == SimKind.ac), None)
-        if ac_req is None:
-            raise ValidationError("sim_plan must include an AC SimRequest")
+        sim_kind = inputs.get("sim_kind")
+        if sim_kind is not None and not isinstance(sim_kind, SimKind):
+            raise ValidationError("sim_kind must be a SimKind if provided")
 
-        control_lines, output_nodes = self._build_ac_control(ac_req.params)
+        sim_req, resolved_kind = self._select_sim(sim_plan, sim_kind)
+
+        if resolved_kind == SimKind.ac:
+            control_lines, output_nodes, expected_outputs = self._build_ac_control(sim_req.params)
+        elif resolved_kind == SimKind.dc:
+            control_lines, output_nodes, expected_outputs = self._build_dc_control(sim_req.params)
+        elif resolved_kind == SimKind.tran:
+            control_lines, output_nodes, expected_outputs = self._build_tran_control(sim_req.params)
+        else:
+            raise ValidationError(f"Unsupported SimKind '{resolved_kind.value}'")
+
         deck_text = _inject_control_block(netlist_text, control_lines)
 
         deck = SpiceDeck(
             text=deck_text,
-            kind=SimKind.ac,
-            expected_outputs={"ac_csv": "ac.csv"},
+            kind=resolved_kind,
+            expected_outputs=expected_outputs,
         )
 
         provenance = Provenance(operator=self.name, version=self.version)
@@ -130,6 +203,7 @@ class DeckBuildOperator(Operator):
                 {"sims": [{"kind": s.kind.value, "params": s.params} for s in sim_plan.sims]}
             )
         )
+        provenance.inputs["sim_kind"] = ArtifactFingerprint(sha256=stable_hash_str(resolved_kind.value))
         provenance.outputs["deck"] = ArtifactFingerprint(
             sha256=stable_hash_json({"kind": deck.kind.value, "expected_outputs": dict(deck.expected_outputs)})
         )

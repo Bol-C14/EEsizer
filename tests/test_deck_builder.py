@@ -23,7 +23,7 @@ def test_deck_builder_injects_ac_control_block():
     )
 
     op = DeckBuildOperator()
-    result = op.run({"netlist_text": netlist, "sim_plan": plan}, ctx=None)
+    result = op.run({"netlist_text": netlist, "sim_plan": plan, "sim_kind": SimKind.ac}, ctx=None)
     deck = result.outputs["deck"]
 
     assert deck.kind == SimKind.ac
@@ -41,5 +41,45 @@ def test_deck_builder_rejects_missing_ac_plan():
     plan = SimPlan(sims=(SimRequest(kind=SimKind.tran, params={}),))
     op = DeckBuildOperator()
 
-    with pytest.raises(ValidationError, match="AC SimRequest"):
-        op.run({"netlist_text": netlist, "sim_plan": plan}, ctx=None)
+    with pytest.raises(ValidationError, match="SimKind 'ac'"):
+        op.run({"netlist_text": netlist, "sim_plan": plan, "sim_kind": SimKind.ac}, ctx=None)
+
+
+def test_deck_builder_dc_block():
+    netlist = "V1 in 0 0\nR1 in out 1k\nC1 out 0 1u\n.end\n"
+    plan = SimPlan(
+        sims=(
+            SimRequest(
+                kind=SimKind.dc,
+                params={"sweep_source": "V1", "sweep_node": "in", "start": 0, "stop": 1, "step": 0.5},
+            ),
+        )
+    )
+    op = DeckBuildOperator()
+    deck = op.run({"netlist_text": netlist, "sim_plan": plan}, ctx=None).outputs["deck"]
+
+    assert deck.kind == SimKind.dc
+    deck_text = deck.text
+    assert "dc V1 0 1 0.5" in deck_text
+    assert "wrdata dc.csv v(in) v(out)" in deck_text
+    assert deck.expected_outputs["dc_csv"] == "dc.csv"
+
+
+def test_deck_builder_tran_block():
+    netlist = "V1 in 0 1\nR1 in out 1k\nC1 out 0 1u\n.end\n"
+    plan = SimPlan(
+        sims=(
+            SimRequest(
+                kind=SimKind.tran,
+                params={"step": 1e-6, "stop": 1e-3, "output_nodes": ["out"]},
+            ),
+        )
+    )
+    op = DeckBuildOperator()
+    deck = op.run({"netlist_text": netlist, "sim_plan": plan}, ctx=None).outputs["deck"]
+
+    assert deck.kind == SimKind.tran
+    deck_text = deck.text
+    assert "tran 1e-06 0.001" in deck_text
+    assert "wrdata tran.csv time v(out)" in deck_text
+    assert deck.expected_outputs["tran_csv"] == "tran.csv"

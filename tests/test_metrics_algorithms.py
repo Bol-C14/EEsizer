@@ -10,6 +10,9 @@ from eesizer_core.metrics import (
     MetricSpec,
     compute_ac_mag_db_at,
     compute_unity_gain_freq,
+    compute_dc_vout_last,
+    compute_dc_slope,
+    compute_tran_rise_time,
     ComputeMetricsOperator,
 )
 from eesizer_core.metrics.registry import MetricRegistry
@@ -17,22 +20,45 @@ from eesizer_core.metrics.registry import MetricRegistry
 
 def _make_raw(tmp_path):
     ac_path = tmp_path / "ac.csv"
-    fixture = Path(__file__).parent / "fixtures" / "ac.csv"
-    ac_path.write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
+    dc_path = tmp_path / "dc.csv"
+    tran_path = tmp_path / "tran.csv"
+    fixtures_dir = Path(__file__).parent / "fixtures"
+    ac_path.write_text((fixtures_dir / "ac.csv").read_text(encoding="utf-8"), encoding="utf-8")
+    dc_path.write_text((fixtures_dir / "dc.csv").read_text(encoding="utf-8"), encoding="utf-8")
+    tran_path.write_text((fixtures_dir / "tran.csv").read_text(encoding="utf-8"), encoding="utf-8")
+
     log_path = tmp_path / "ngspice.log"
     log_path.write_text("", encoding="utf-8")
-    return RawSimData(
-        kind=SimKind.ac,
-        run_dir=tmp_path,
-        outputs={"ac_csv": ac_path},
-        log_path=log_path,
-        cmdline=[],
-        returncode=0,
-    )
+    return {
+        "ac": RawSimData(
+            kind=SimKind.ac,
+            run_dir=tmp_path,
+            outputs={"ac_csv": ac_path},
+            log_path=log_path,
+            cmdline=[],
+            returncode=0,
+        ),
+        "dc": RawSimData(
+            kind=SimKind.dc,
+            run_dir=tmp_path,
+            outputs={"dc_csv": dc_path},
+            log_path=log_path,
+            cmdline=[],
+            returncode=0,
+        ),
+        "tran": RawSimData(
+            kind=SimKind.tran,
+            run_dir=tmp_path,
+            outputs={"tran_csv": tran_path},
+            log_path=log_path,
+            cmdline=[],
+            returncode=0,
+        ),
+    }
 
 
 def test_ac_mag_db_at(tmp_path):
-    raw = _make_raw(tmp_path)
+    raw = _make_raw(tmp_path)["ac"]
     spec = MetricSpec(
         name="ac_mag_db_at_10",
         unit="dB",
@@ -46,7 +72,7 @@ def test_ac_mag_db_at(tmp_path):
 
 
 def test_unity_gain_freq(tmp_path):
-    raw = _make_raw(tmp_path)
+    raw = _make_raw(tmp_path)["ac"]
     spec = MetricSpec(
         name="ac_unity_gain_freq",
         unit="Hz",
@@ -60,7 +86,7 @@ def test_unity_gain_freq(tmp_path):
 
 
 def test_compute_metrics_operator_with_registry(tmp_path):
-    raw = _make_raw(tmp_path)
+    raw = _make_raw(tmp_path)["ac"]
     registry = MetricRegistry(
         {
             "ac_mag_db_at_1k": MetricSpec(
@@ -82,7 +108,48 @@ def test_compute_metrics_operator_with_registry(tmp_path):
 
 
 def test_unknown_metric_raises(tmp_path):
-    raw = _make_raw(tmp_path)
+    raw = _make_raw(tmp_path)["ac"]
     op = ComputeMetricsOperator(registry=DEFAULT_REGISTRY)
     with pytest.raises(ValidationError):
         op.run({"raw_data": raw, "metric_names": ["missing_metric"]}, ctx=None)
+
+
+def test_dc_metrics(tmp_path):
+    raw = _make_raw(tmp_path)["dc"]
+    spec_last = MetricSpec(
+        name="dc_vout_last",
+        unit="V",
+        requires_kind=SimKind.dc,
+        requires_outputs=("dc_csv",),
+        compute_fn=compute_dc_vout_last,
+        params={"node": "out"},
+    )
+    value = compute_dc_vout_last(raw, spec_last)
+    assert value == pytest.approx(0.5)
+
+    spec_slope = MetricSpec(
+        name="dc_slope",
+        unit="V/V",
+        requires_kind=SimKind.dc,
+        requires_outputs=("dc_csv",),
+        compute_fn=compute_dc_slope,
+        params={"sweep_col": "v(in)", "node": "out"},
+    )
+    value, diag = compute_dc_slope(raw, spec_slope)
+    assert diag == {}
+    assert value == pytest.approx(0.5)
+
+
+def test_tran_rise_time(tmp_path):
+    raw = _make_raw(tmp_path)["tran"]
+    spec = MetricSpec(
+        name="tran_rise_time",
+        unit="s",
+        requires_kind=SimKind.tran,
+        requires_outputs=("tran_csv",),
+        compute_fn=compute_tran_rise_time,
+        params={"node": "out"},
+    )
+    value, diag = compute_tran_rise_time(raw, spec)
+    assert diag == {} or diag is None
+    assert value == pytest.approx(0.0002)

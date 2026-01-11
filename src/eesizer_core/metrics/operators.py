@@ -58,11 +58,17 @@ class ComputeMetricsOperator(Operator):
                     raise ValidationError(f"Metric '{spec.name}' requires output '{out_name}'")
 
             try:
-                value = spec.compute_fn(raw, spec)
+                computed = spec.compute_fn(raw, spec)
             except Exception as exc:
                 raise MetricError(f"Failed to compute metric '{spec.name}': {exc}") from exc
 
-            metrics.values[spec.name] = MetricValue(name=spec.name, value=value, unit=spec.unit, details=spec.params)
+            details = dict(spec.params)
+            value = computed
+            if isinstance(computed, tuple) and len(computed) == 2:
+                value, diag = computed
+                if isinstance(diag, dict):
+                    details.update(diag)
+            metrics.values[spec.name] = MetricValue(name=spec.name, value=value, unit=spec.unit, details=details)
 
         provenance.outputs["metrics"] = ArtifactFingerprint(
             sha256=stable_hash_json({k: v.value for k, v in metrics.values.items()})
