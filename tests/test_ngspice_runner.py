@@ -11,7 +11,12 @@ from eesizer_core.contracts.errors import SimulationError
 def test_ngspice_runner_success(monkeypatch, tmp_path):
     workspace = tmp_path / "output"
     ctx = RunContext(workspace_root=workspace)
-    deck = SpiceDeck(text="* test\n.end\n", kind=SimKind.ac, expected_outputs={"ac_csv": "ac.csv"})
+    deck = SpiceDeck(
+        text="* test\n.end\n",
+        kind=SimKind.ac,
+        expected_outputs={"ac_csv": "ac.csv"},
+        expected_outputs_meta={"ac_csv": ("frequency", "real(v(out))", "imag(v(out))")},
+    )
 
     def fake_run(cmd, capture_output, text, check, timeout, cwd):
         # Simulate ngspice writing expected outputs into the cwd.
@@ -32,6 +37,7 @@ def test_ngspice_runner_success(monkeypatch, tmp_path):
     assert raw.log_path.exists()
     assert "deck_ac.sp" in str(result.outputs["deck_path"])
     assert raw.returncode == 0
+    assert raw.outputs_meta["ac_csv"] == ("frequency", "real(v(out))", "imag(v(out))")
 
 
 def test_ngspice_runner_missing_binary(monkeypatch, tmp_path):

@@ -8,8 +8,8 @@ import pandas as pd
 from ..contracts.errors import MetricError, ValidationError
 from ..contracts.enums import SimKind
 from ..sim.artifacts import RawSimData
+from ..io.ngspice_wrdata import load_wrdata_table
 from .registry import MetricImplSpec
-from .io import load_wrdata_table
 
 
 def _interp_at(freq: np.ndarray, values: np.ndarray, target: float) -> float:
@@ -43,11 +43,11 @@ def _extract_ac(raw: RawSimData, spec: MetricImplSpec) -> Tuple[np.ndarray, np.n
     if raw.kind != SimKind.ac:
         raise ValidationError(f"AC metric '{spec.name}' requires SimKind.ac data")
     node = str(spec.params.get("node", "out"))
-    expected_cols = ["frequency", f"vdb({node})", f"vp({node})"]
+    expected_cols = list(raw.outputs_meta.get("ac_csv", ())) or ["frequency", f"real(v({node}))", f"imag(v({node}))"]
     ac_path = raw.outputs.get("ac_csv")
     if ac_path is None:
         raise ValidationError("RawSimData missing required output 'ac_csv'")
-    df = load_wrdata_table(ac_path, expected_columns=expected_cols)
+    _, df = load_wrdata_table(ac_path, expected_columns=expected_cols)
 
     def _pick_column(df: pd.DataFrame, target: str) -> pd.Series:
         target_lower = target.lower()
@@ -57,7 +57,11 @@ def _extract_ac(raw: RawSimData, spec: MetricImplSpec) -> Tuple[np.ndarray, np.n
         raise MetricError(f"Column '{target}' not found in AC data; available: {df.columns.tolist()}")
 
     freq = _pick_column(df, "frequency").to_numpy(dtype=float)
-    mag_db_col = _pick_column(df, f"vdb({node})").to_numpy(dtype=float)
+    real = _pick_column(df, f"real(v({node}))").to_numpy(dtype=float)
+    imag = _pick_column(df, f"imag(v({node}))").to_numpy(dtype=float)
+    mag = np.sqrt(real**2 + imag**2)
+    mag = np.maximum(mag, 1e-30)
+    mag_db_col = 20 * np.log10(mag)
     return freq, mag_db_col
 
 
@@ -69,7 +73,10 @@ def compute_ac_mag_db_at(raw: RawSimData, spec: MetricImplSpec) -> float:
     return _interp_at(freq, mag_db, float(target_hz))
 
 
-def compute_unity_gain_freq(raw: RawSimData, spec: MetricImplSpec) -> float:
+def compute_unity_gain_freq(raw: RawSimData, spec: MetricImplSpec) -> float | tuple[float | None, dict]:
     freq, mag_db = _extract_ac(raw, spec)
     target = float(spec.params.get("target_db", 0.0))
-    return _first_crossing_from_above(freq, mag_db, target)
+    try:
+        return _first_crossing_from_above(freq, mag_db, target)
+    except MetricError as exc:
+        return None, {"reason": str(exc)}

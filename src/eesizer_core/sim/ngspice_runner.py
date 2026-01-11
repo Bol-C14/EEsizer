@@ -124,6 +124,7 @@ class NgspiceRunOperator(Operator):
             kind=deck.kind,
             run_dir=stage_dir,
             outputs=outputs,
+            outputs_meta=dict(deck.expected_outputs_meta),
             log_path=log_path,
             cmdline=cmd,
             returncode=proc.returncode,

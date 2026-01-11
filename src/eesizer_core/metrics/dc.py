@@ -7,8 +7,8 @@ import numpy as np
 from ..contracts.enums import SimKind
 from ..contracts.errors import MetricError, ValidationError
 from ..sim.artifacts import RawSimData
+from ..io.ngspice_wrdata import load_wrdata_table
 from .registry import MetricImplSpec
-from .io import load_wrdata_table
 
 
 def compute_dc_vout_last(raw: RawSimData, spec: MetricImplSpec) -> float:
@@ -20,8 +20,8 @@ def compute_dc_vout_last(raw: RawSimData, spec: MetricImplSpec) -> float:
 
     node = str(spec.params.get("node", "out"))
     sweep_col = str(spec.params.get("sweep_col", "v(in)"))
-    expected_cols = [sweep_col, f"v({node})"]
-    df = load_wrdata_table(dc_path, expected_columns=expected_cols)
+    expected_cols = list(raw.outputs_meta.get("dc_csv", ())) or [sweep_col, f"v({node})"]
+    _, df = load_wrdata_table(dc_path, expected_columns=expected_cols)
 
     def _pick_column(df, target: str):
         target_lower = target.lower()
@@ -48,8 +48,8 @@ def compute_dc_slope(raw: RawSimData, spec: MetricImplSpec) -> Tuple[float | Non
 
     sweep_col = str(spec.params.get("sweep_col", "v(in)"))
     node = str(spec.params.get("node", "out"))
-    expected_cols = [sweep_col, f"v({node})"]
-    df = load_wrdata_table(dc_path, expected_columns=expected_cols)
+    expected_cols = list(raw.outputs_meta.get("dc_csv", ())) or [sweep_col, f"v({node})"]
+    _, df = load_wrdata_table(dc_path, expected_columns=expected_cols)
 
     def _pick_column(df, target: str):
         target_lower = target.lower()

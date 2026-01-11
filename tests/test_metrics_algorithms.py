@@ -34,6 +34,7 @@ def _make_raw(tmp_path):
             kind=SimKind.ac,
             run_dir=tmp_path,
             outputs={"ac_csv": ac_path},
+            outputs_meta={"ac_csv": ("frequency", "real(v(out))", "imag(v(out))")},
             log_path=log_path,
             cmdline=[],
             returncode=0,
@@ -42,6 +43,7 @@ def _make_raw(tmp_path):
             kind=SimKind.dc,
             run_dir=tmp_path,
             outputs={"dc_csv": dc_path},
+            outputs_meta={"dc_csv": ("v(in)", "v(out)")},
             log_path=log_path,
             cmdline=[],
             returncode=0,
@@ -50,6 +52,7 @@ def _make_raw(tmp_path):
             kind=SimKind.tran,
             run_dir=tmp_path,
             outputs={"tran_csv": tran_path},
+            outputs_meta={"tran_csv": ("time", "v(out)")},
             log_path=log_path,
             cmdline=[],
             returncode=0,
@@ -68,7 +71,7 @@ def test_ac_mag_db_at(tmp_path):
         params={"target_hz": 10, "node": "out"},
     )
     value = compute_ac_mag_db_at(raw, spec)
-    assert value == pytest.approx(10.0)
+    assert value == pytest.approx(0.0)
 
 
 def test_unity_gain_freq(tmp_path):
@@ -82,7 +85,7 @@ def test_unity_gain_freq(tmp_path):
         params={"node": "out"},
     )
     value = compute_unity_gain_freq(raw, spec)
-    assert value == pytest.approx(100.0)
+    assert value == pytest.approx(10.0)
 
 
 def test_compute_metrics_operator_with_registry(tmp_path):
@@ -104,7 +107,7 @@ def test_compute_metrics_operator_with_registry(tmp_path):
     result = op.run({"raw_data": raw, "metric_names": ["ac_mag_db_at_1k"]}, ctx=None)
 
     metrics = result.outputs["metrics"]
-    assert metrics.values["ac_mag_db_at_1k"].value == pytest.approx(-10.0)
+    assert metrics.values["ac_mag_db_at_1k"].value == pytest.approx(-40.0)
 
 
 def test_unknown_metric_raises(tmp_path):

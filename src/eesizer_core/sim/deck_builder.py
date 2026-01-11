@@ -83,7 +83,7 @@ class DeckBuildOperator(Operator):
         self.default_tran_step = default_tran_step
         self.default_tran_stop = default_tran_stop
 
-    def _build_ac_control(self, params: Mapping[str, Any]) -> tuple[list[str], tuple[str, ...]]:
+    def _build_ac_control(self, params: Mapping[str, Any]) -> tuple[list[str], tuple[str, ...], dict[str, tuple[str, ...]]]:
         p_per_dec = params.get("points_per_decade", self.default_points_per_decade)
         start = params.get("start_hz", self.default_start_hz)
         stop = params.get("stop_hz", self.default_stop_hz)
@@ -104,17 +104,20 @@ class DeckBuildOperator(Operator):
             "quit",
             ".endc",
         ]
-        return control_lines, output_nodes, {"ac_csv": "ac.csv"}
+        meta = {"ac_csv": tuple(["frequency"] + self._ac_columns(output_nodes))}
+        return control_lines, output_nodes, {"ac_csv": "ac.csv"}, meta
 
     @staticmethod
     def _ac_columns(nodes: tuple[str, ...]) -> list[str]:
         cols: list[str] = []
         for node in nodes:
-            cols.append(f"vdb({node})")
-            cols.append(f"vp({node})")
+            cols.append(f"real(v({node}))")
+            cols.append(f"imag(v({node}))")
         return cols
 
-    def _build_dc_control(self, params: Mapping[str, Any]) -> tuple[list[str], tuple[str, ...], dict[str, str]]:
+    def _build_dc_control(
+        self, params: Mapping[str, Any]
+    ) -> tuple[list[str], tuple[str, ...], dict[str, str], dict[str, tuple[str, ...]]]:
         source = params.get("sweep_source", self.default_dc_source)
         sweep_node = params.get("sweep_node", self.default_dc_sweep_node)
         start = params.get("start", self.default_dc_start)
@@ -133,9 +136,12 @@ class DeckBuildOperator(Operator):
             "quit",
             ".endc",
         ]
-        return control_lines, output_nodes, {"dc_csv": "dc.csv"}
+        meta = {"dc_csv": tuple([f"v({sweep_node})"] + [f"v({n})" for n in output_nodes])}
+        return control_lines, output_nodes, {"dc_csv": "dc.csv"}, meta
 
-    def _build_tran_control(self, params: Mapping[str, Any]) -> tuple[list[str], tuple[str, ...], dict[str, str]]:
+    def _build_tran_control(
+        self, params: Mapping[str, Any]
+    ) -> tuple[list[str], tuple[str, ...], dict[str, str], dict[str, tuple[str, ...]]]:
         step = params.get("step", self.default_tran_step)
         stop = params.get("stop", self.default_tran_stop)
         output_nodes = _normalize_output_nodes(params.get("output_nodes"))
@@ -148,7 +154,8 @@ class DeckBuildOperator(Operator):
             "quit",
             ".endc",
         ]
-        return control_lines, output_nodes, {"tran_csv": "tran.csv"}
+        meta = {"tran_csv": tuple(["time"] + [f"v({n})" for n in output_nodes])}
+        return control_lines, output_nodes, {"tran_csv": "tran.csv"}, meta
 
     @staticmethod
     def _select_sim(sim_plan: SimPlan, sim_kind: SimKind | None) -> tuple[SimRequest, SimKind]:
@@ -198,17 +205,23 @@ class DeckBuildOperator(Operator):
         sim_req, resolved_kind = self._select_sim(sim_plan, sim_kind)
 
         if resolved_kind == SimKind.ac:
-            control_lines, output_nodes, expected_outputs = self._build_ac_control(sim_req.params)
+            control_lines, output_nodes, expected_outputs, outputs_meta = self._build_ac_control(sim_req.params)
         elif resolved_kind == SimKind.dc:
-            control_lines, output_nodes, expected_outputs = self._build_dc_control(sim_req.params)
+            control_lines, output_nodes, expected_outputs, outputs_meta = self._build_dc_control(sim_req.params)
         elif resolved_kind == SimKind.tran:
-            control_lines, output_nodes, expected_outputs = self._build_tran_control(sim_req.params)
+            control_lines, output_nodes, expected_outputs, outputs_meta = self._build_tran_control(sim_req.params)
         else:
             raise ValidationError(f"Unsupported SimKind '{resolved_kind.value}'")
 
         deck_text = _inject_control_block(netlist_text, control_lines)
 
-        deck = SpiceDeck(text=deck_text, kind=resolved_kind, expected_outputs=expected_outputs, workdir=base_dir)
+        deck = SpiceDeck(
+            text=deck_text,
+            kind=resolved_kind,
+            expected_outputs=expected_outputs,
+            expected_outputs_meta=outputs_meta,
+            workdir=base_dir,
+        )
 
         provenance = Provenance(operator=self.name, version=self.version)
         provenance.inputs["netlist_text"] = ArtifactFingerprint(sha256=stable_hash_str(netlist_text))

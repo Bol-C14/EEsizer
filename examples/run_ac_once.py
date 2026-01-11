@@ -6,13 +6,14 @@ from pathlib import Path
 from eesizer_core.contracts import SimPlan, SimRequest
 from eesizer_core.contracts.enums import SimKind
 from eesizer_core.runtime.context import RunContext
-from eesizer_core.sim import DeckBuildOperator, NgspiceRunOperator
+from eesizer_core.sim import DeckBuildOperator, NgspiceRunOperator, NetlistBundle
 from eesizer_core.metrics import ComputeMetricsOperator
 
 
 def main() -> None:
     here = Path(__file__).resolve().parent
-    netlist_text = (here / "rc_lowpass.sp").read_text(encoding="utf-8")
+    netlist_path = here / "rc_lowpass.sp"
+    bundle = NetlistBundle(netlist_path.read_text(encoding="utf-8"), base_dir=netlist_path.parent)
 
     plan = SimPlan(
         sims=(
@@ -28,7 +29,7 @@ def main() -> None:
         )
     )
 
-    deck = DeckBuildOperator().run({"netlist_text": netlist_text, "sim_plan": plan}, ctx=None).outputs["deck"]
+    deck = DeckBuildOperator().run({"netlist_bundle": bundle, "sim_plan": plan}, ctx=None).outputs["deck"]
 
     ctx = RunContext(workspace_root=here / "output")
     runner = NgspiceRunOperator()

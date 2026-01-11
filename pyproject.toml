@@ -32,3 +32,6 @@ include = ["eesizer_core*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  "integration: requires ngspice or external tools"
+]

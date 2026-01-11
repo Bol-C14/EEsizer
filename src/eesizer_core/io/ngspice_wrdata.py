@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from io import StringIO
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence, Tuple
 
 import pandas as pd
 
@@ -18,9 +18,9 @@ def _all_numeric(tokens: list[str]) -> bool:
     return True
 
 
-def _normalize_header_line(line: str, comment_prefix: str = "*") -> list[str]:
-    if line.startswith(comment_prefix):
-        line = line[len(comment_prefix):]
+def _normalize_header(line: str, comment_prefix: str) -> list[str]:
+    if comment_prefix and line.startswith(comment_prefix):
+        line = line[len(comment_prefix) :]
     return [tok.strip() for tok in line.strip().split() if tok.strip()]
 
 
@@ -28,15 +28,16 @@ def load_wrdata_table(
     path: Path,
     expected_columns: Sequence[str] | None = None,
     comment_prefix: str = "*",
-) -> pd.DataFrame:
-    """Robustly load an ngspice wrdata table that may or may not include a header.
+) -> Tuple[list[str], pd.DataFrame]:
+    """Robustly load an ngspice wrdata table (whitespace-separated).
 
-    Rules:
+    Handling:
     - Strip empty lines.
-    - If the first non-empty line starts with comment_prefix, treat it as the header (sans prefix).
-    - Else, if the first line is non-numeric, treat it as the header.
-    - Else, assume no header; use expected_columns if shape matches, otherwise auto-generate c0..cN.
+    - If first non-empty line starts with comment_prefix, use it as header (sans prefix).
+    - Else, if the first line is non-numeric, treat as header.
+    - Else, assume no header and use expected_columns if provided (must match column count) else auto c0..cN.
     - Comment-prefixed lines in the data section are skipped.
+    Raises MetricError on missing file, empty content, or column count mismatch.
     """
     if not path.exists():
         raise MetricError(f"wrdata file not found: {path}")
@@ -49,8 +50,8 @@ def load_wrdata_table(
     data_start = 0
 
     first = lines[0]
-    if first.startswith(comment_prefix):
-        header_tokens = _normalize_header_line(first, comment_prefix=comment_prefix)
+    if comment_prefix and first.startswith(comment_prefix):
+        header_tokens = _normalize_header(first, comment_prefix)
         data_start = 1
     else:
         tokens = first.split()
@@ -69,23 +70,26 @@ def load_wrdata_table(
 
     sample_cols = len(data_lines[0].split())
     if header_tokens is None:
-        if expected_columns and len(expected_columns) == sample_cols:
-            header_tokens = list(expected_columns)
+        if expected_columns is not None:
+            if len(expected_columns) > sample_cols:
+                raise MetricError(
+                    f"Data columns ({sample_cols}) fewer than expected ({len(expected_columns)}) in {path}"
+                )
+            header_tokens = list(expected_columns) + [f"c{i}" for i in range(len(expected_columns), sample_cols)]
         else:
             header_tokens = [f"c{i}" for i in range(sample_cols)]
     else:
-        if expected_columns and len(expected_columns) != len(header_tokens):
+        if expected_columns is not None and len(expected_columns) != len(header_tokens):
             raise MetricError(
-                f"Header column count ({len(header_tokens)}) does not match expected ({len(expected_columns)})"
+                f"Header column count ({len(header_tokens)}) does not match expected ({len(expected_columns)}) in {path}"
             )
 
     csv_buf = StringIO("\n".join(data_lines))
     df = pd.read_csv(csv_buf, sep=r"\s+", header=None, engine="python")
-
     if df.shape[1] != len(header_tokens):
         raise MetricError(
             f"Column count mismatch: header {len(header_tokens)} vs data {df.shape[1]} in {path}"
         )
 
     df.columns = header_tokens
-    return df
+    return header_tokens, df

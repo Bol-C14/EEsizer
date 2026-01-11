@@ -16,6 +16,11 @@ SimPlan is the “what to run” spec:
 
 Do not merge these into a single mega-file.
 
+### Deck/Runner rules (Step4)
+- `SpiceDeck.expected_outputs` names are always written to the run directory (`runs/<run_id>/<stage>/...`).
+- `SpiceDeck.expected_outputs_meta` records the wrdata column order (e.g., `("frequency", "vdb(out)", "vp(out)")`).
+- `SpiceDeck.workdir` is mandatory when the source netlist uses relative `.include`/`.lib`; `NgspiceRunOperator` runs with `cwd=workdir` and rewrites wrdata targets to absolute paths under the run directory.
+
 ## 3) Metric registry
 Every metric must have:
 - name (stable id)
@@ -25,6 +30,11 @@ Every metric must have:
 - implementation reference
 
 This prevents “same metric name, different definitions”.
+
+### Naming (contract vs implementation)
+- Contract layer: `contracts.artifacts.MetricSpec` = declaration of required sim/output/unit.
+- Implementation layer: `metrics.registry.MetricImplSpec` = executable definition with `compute_fn`.
+- Mapping: Strategy/Policy should depend on the contract spec; operators/registry use the impl spec.
 
 ## 4) Adding a new metric
 1) Add metric spec to registry
@@ -42,6 +52,15 @@ Simulator operator must record:
 Metric operator must record:
 - which files were read
 - any fallback behavior (e.g., missing columns)
+
+## 7) wrdata file format (ngspice)
+- Files are whitespace-separated tables (often named `.csv` but not comma-separated).
+- Header handling:
+  - If the first non-empty line starts with `*`, treat it as header (sans `*`).
+  - If the first line is non-numeric, treat it as header.
+  - If no header, use the column order from `SpiceDeck.expected_outputs_meta` (e.g., `frequency vdb(out) vp(out)`).
+- `load_wrdata_table` (in `eesizer_core/io/ngspice_wrdata.py`) is the single loader used by all metrics; do not reimplement parsing.
+- Metrics must raise clear errors when required columns are missing (no silent fallbacks).
 
 ## 6) Known legacy issues to avoid
 See `legacy/docs/code_review_2025-12-31.md` for prior metric correctness notes.

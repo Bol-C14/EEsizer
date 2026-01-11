@@ -7,8 +7,8 @@ import numpy as np
 from ..contracts.enums import SimKind
 from ..contracts.errors import MetricError, ValidationError
 from ..sim.artifacts import RawSimData
+from ..io.ngspice_wrdata import load_wrdata_table
 from .registry import MetricImplSpec
-from .io import load_wrdata_table
 
 
 def _rise_time(time: np.ndarray, values: np.ndarray, low_frac: float = 0.1, high_frac: float = 0.9) -> float | None:
@@ -44,8 +44,8 @@ def compute_tran_rise_time(raw: RawSimData, spec: MetricImplSpec) -> Tuple[float
         raise ValidationError("RawSimData missing required output 'tran_csv'")
 
     node = str(spec.params.get("node", "out"))
-    expected_cols = ["time", f"v({node})"]
-    df = load_wrdata_table(tran_path, expected_columns=expected_cols)
+    expected_cols = list(raw.outputs_meta.get("tran_csv", ())) or ["time", f"v({node})"]
+    _, df = load_wrdata_table(tran_path, expected_columns=expected_cols)
 
     def _pick_column(df, target: str):
         target_lower = target.lower()
