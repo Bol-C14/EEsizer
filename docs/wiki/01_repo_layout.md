@@ -16,28 +16,37 @@ Contains the previous runnable implementation and historical run outputs.
 **Rule:** do not add new features under `legacy/`.
 
 ### Refactor-track directories (new code)
-Recommended new layout:
+Current state:
 
 ```
-src/eesizer_core/          # reusable core: IR, constraints, patch engine, sim, metrics, strategies
-src/eesizer_cli/           # thin CLI wrapper over eesizer_core
+src/eesizer_core/          # reusable core: contracts, domain.spice, operators.netlist, sim, metrics, runtime
 tests/                     # refactor-track tests (pytest)
-examples/                  # minimal reproducible demos (used by CI)
+examples/                  # minimal reproducible demos (ngspice + metrics)
 docs/wiki/                 # this wiki
 docs/templates/            # schemas / example configs
 output/                    # local run artifacts (gitignored)
 ```
 
+Planned (not yet implemented):
+```
+src/eesizer_cli/           # thin CLI wrapper over eesizer_core (future)
+src/eesizer_core/strategies/   # orchestration (future)
+src/eesizer_core/policies/     # decision-making (future)
+```
+
 ## Module ownership
-- `eesizer_core/ir/*` owns: parsing, parameter-space extraction, topology signature.
-- `eesizer_core/patch/*` owns: patch schema, validation, deterministic apply.
-- `eesizer_core/sim/*` owns: deck building, simulator runners.
-- `eesizer_core/metrics/*` owns: metric registry + implementations.
-- `eesizer_core/strategies/*` owns: orchestration (loop, stopping rules, logging).
-- `eesizer_core/policies/*` owns: decision-making (LLM, RL, BO); **no file I/O**, **no netlist editing**.
+- `eesizer_core/contracts/*`: artifacts (CircuitIR/ParamSpace/Patch/SimPlan/MetricSpec...), enums, errors, operators/policy/strategy protocols, provenance.
+- `eesizer_core/domain/spice/*`: netlist parsing/indexing, sanitize rules, topology signature, patch validation/apply logic (pure functions; no I/O).
+- `eesizer_core/operators/netlist/*`: Operator wrappers for sanitize/index/signature/patch apply.
+- `eesizer_core/sim/*`: deck builder, netlist bundle, ngspice runner (file/command execution).
+- `eesizer_core/metrics/*`: MetricImplSpec, registry, compute functions (AC/DC/TRAN), compute operator.
+- `eesizer_core/runtime/*`: RunContext (run_dir/workspace utilities).
+- (planned) `eesizer_core/strategies/*`: workflow orchestration (loop, stopping rules, logging).
+- (planned) `eesizer_core/policies/*`: decision-making (LLM, RL, BO); **no file I/O**, **no netlist editing**.
+- (planned) `eesizer_cli/`: thin CLI that wires strategies/policies/operators.
 
 ## Naming conventions
-- Artifacts: `CircuitIR`, `ParamSpace`, `Patch`, `SimPlan`, `RawSimData`, `MetricSet`, `RunManifest`
+- Artifacts: `CircuitIR`, `ParamSpace`, `Patch`, `SimPlan`, `RawSimData`, `MetricsBundle`, `RunManifest`
 - Operators end with `Operator` and implement `run()`
 - Strategies end with `Strategy`
 - Policies end with `Policy`
