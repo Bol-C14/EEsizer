@@ -38,9 +38,15 @@ class NgspiceRunOperator(Operator):
     name = "ngspice_run"
     version = "0.1.0"
 
-    def __init__(self, ngspice_bin: str = "ngspice", timeout_s: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        ngspice_bin: str = "ngspice",
+        timeout_s: Optional[float] = None,
+        fail_on_nonzero_returncode: bool = True,
+    ) -> None:
         self.ngspice_bin = ngspice_bin
         self.timeout_s = timeout_s
+        self.fail_on_nonzero_returncode = fail_on_nonzero_returncode
 
     def _write_deck(self, deck: SpiceDeck, stage_dir: Path) -> Path:
         deck_path = stage_dir / f"deck_{deck.kind.value}.sp"
@@ -115,9 +121,10 @@ class NgspiceRunOperator(Operator):
         stdout_tail = _tail(proc.stdout or "")
         stderr_tail = _tail(proc.stderr or "")
 
-        if proc.returncode != 0:
+        if proc.returncode != 0 and self.fail_on_nonzero_returncode:
             raise SimulationError(
                 f"ngspice exited with code {proc.returncode}; see log at {log_path}\n"
+                f"stdout tail: {stdout_tail or '<empty>'}\n"
                 f"stderr tail: {stderr_tail or '<empty>'}"
             )
 

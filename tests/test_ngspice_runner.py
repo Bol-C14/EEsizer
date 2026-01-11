@@ -97,3 +97,18 @@ def test_ngspice_runner_missing_expected_output(monkeypatch, tmp_path):
 
     with pytest.raises(SimulationError, match="Expected output"):
         op.run({"deck": deck}, ctx)
+
+
+def test_ngspice_runner_nonzero_returncode(monkeypatch, tmp_path):
+    workspace = tmp_path / "output"
+    ctx = RunContext(workspace_root=workspace)
+    deck = SpiceDeck(text="* test\n.end\n", kind=SimKind.ac, expected_outputs={"ac_csv": "ac.csv"})
+
+    def fake_run(cmd, capture_output, text, check, timeout, cwd):
+        return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="fail", stderr="boom")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    op = NgspiceRunOperator()
+    with pytest.raises(SimulationError, match="exited with code 1"):
+        op.run({"deck": deck}, ctx)
