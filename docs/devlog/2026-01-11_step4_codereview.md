@@ -19,7 +19,7 @@
 - Legacy isolation: no runtime imports from `legacy/`; only migrated logic.
 
 ## Extensibility
-- Adding a metric requires only a compute function + MetricSpec registration (registry/operator are generic).
+- Adding a metric requires only a compute function + MetricImplSpec registration (registry/operator are generic).
 - Deck/run/metrics are decoupled (no strategy/runner edits needed for new metrics).
 
 ## Notes / Risks

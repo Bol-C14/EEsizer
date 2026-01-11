@@ -11,7 +11,7 @@
 
 ## Work Completed
 
-- Added `MetricSpec`/`MetricRegistry` (`src/eesizer_core/metrics/registry.py`) and default registry (`metrics/defaults.py`) with AC metrics:
+- Added `MetricImplSpec`/`MetricRegistry` (`src/eesizer_core/metrics/registry.py`) and default registry (`metrics/defaults.py`) with AC metrics:
   - `ac_mag_db_at_1k` (gain at 1 kHz, node `out`)
   - `ac_unity_gain_freq` (first 0 dB crossing for node `out`)
 - Implemented AC metric functions (`src/eesizer_core/metrics/ac.py`) and a `ComputeMetricsOperator` (`metrics/operators.py`) that maps `RawSimData` + metric names to `MetricsBundle`.

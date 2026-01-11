@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from ..contracts.artifacts import SimPlan, SimRequest
+from ..contracts.artifacts import SimPlan, SimRequest, CircuitIR
 from ..contracts.enums import SimKind
 from ..contracts.errors import ValidationError
 from ..contracts.operators import Operator, OperatorResult
 from ..contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_json, stable_hash_str
 from ..domain.spice.sanitize_rules import has_control_block
-from .artifacts import SpiceDeck
+from .artifacts import SpiceDeck, NetlistBundle
 
 
 def _format_value(v: Any) -> str:
@@ -164,8 +165,25 @@ class DeckBuildOperator(Operator):
 
     def run(self, inputs: Mapping[str, Any], ctx: Any) -> OperatorResult:
         netlist_text = inputs.get("netlist_text")
+        base_dir = inputs.get("base_dir")
+        bundle = inputs.get("netlist_bundle")
+        circuit_ir = inputs.get("circuit_ir")
+
+        if bundle is not None:
+            if not isinstance(bundle, NetlistBundle):
+                raise ValidationError("netlist_bundle must be a NetlistBundle")
+            netlist_text = bundle.text
+            base_dir = bundle.base_dir
+        elif circuit_ir is not None:
+            if not isinstance(circuit_ir, CircuitIR):
+                raise ValidationError("circuit_ir must be a CircuitIR")
+            netlist_text = "\n".join(circuit_ir.lines)
+            base_dir = base_dir or None
+
         if not isinstance(netlist_text, str):
             raise ValidationError("netlist_text must be provided as a string")
+        if base_dir is not None:
+            base_dir = Path(base_dir)
         if has_control_block(netlist_text):
             raise ValidationError("netlist_text must not contain .control/.endc blocks")
 
@@ -190,11 +208,7 @@ class DeckBuildOperator(Operator):
 
         deck_text = _inject_control_block(netlist_text, control_lines)
 
-        deck = SpiceDeck(
-            text=deck_text,
-            kind=resolved_kind,
-            expected_outputs=expected_outputs,
-        )
+        deck = SpiceDeck(text=deck_text, kind=resolved_kind, expected_outputs=expected_outputs, workdir=base_dir)
 
         provenance = Provenance(operator=self.name, version=self.version)
         provenance.inputs["netlist_text"] = ArtifactFingerprint(sha256=stable_hash_str(netlist_text))

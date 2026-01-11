@@ -7,7 +7,7 @@ import numpy as np
 from ..contracts.enums import SimKind
 from ..contracts.errors import MetricError, ValidationError
 from ..sim.artifacts import RawSimData
-from .registry import MetricSpec
+from .registry import MetricImplSpec
 from .io import load_wrdata_table
 
 
@@ -36,7 +36,7 @@ def _rise_time(time: np.ndarray, values: np.ndarray, low_frac: float = 0.1, high
     return max(0.0, t_high - t_low)
 
 
-def compute_tran_rise_time(raw: RawSimData, spec: MetricSpec) -> Tuple[float | None, dict]:
+def compute_tran_rise_time(raw: RawSimData, spec: MetricImplSpec) -> Tuple[float | None, dict]:
     if raw.kind != SimKind.tran:
         raise ValidationError(f"TRAN metric '{spec.name}' requires SimKind.tran data")
     tran_path = raw.outputs.get("tran_csv")

@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from eesizer_core.contracts import SimPlan, SimRequest
 from eesizer_core.contracts.errors import ValidationError
@@ -83,3 +84,13 @@ def test_deck_builder_tran_block():
     assert "tran 1e-06 0.001" in deck_text
     assert "wrdata tran.csv time v(out)" in deck_text
     assert deck.expected_outputs["tran_csv"] == "tran.csv"
+
+
+def test_deck_builder_preserves_base_dir():
+    netlist = "V1 in 0 1\nR1 in out 1k\n.end\n"
+    plan = SimPlan(sims=(SimRequest(kind=SimKind.ac, params={"output_nodes": ["out"]}),))
+    base_dir = Path("/tmp/mycircuits")
+    deck = DeckBuildOperator().run({"netlist_text": netlist, "sim_plan": plan, "base_dir": base_dir}, ctx=None).outputs[
+        "deck"
+    ]
+    assert deck.workdir == base_dir

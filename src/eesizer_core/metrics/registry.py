@@ -6,12 +6,13 @@ from typing import Callable, Iterable, Mapping
 from ..contracts.enums import SimKind
 from ..contracts.errors import ValidationError
 from ..sim.artifacts import RawSimData
-
-ComputeFn = Callable[[RawSimData, "MetricSpec"], float | None]
+ComputeFn = Callable[[RawSimData, "MetricImplSpec"], float | None]
 
 
 @dataclass(frozen=True)
-class MetricSpec:
+class MetricImplSpec:
+    """Executable metric definition (implementation-level)."""
+
     name: str
     unit: str
     requires_kind: SimKind
@@ -24,10 +25,10 @@ class MetricSpec:
 class MetricRegistry:
     """Lookup and resolve metric specs by name."""
 
-    def __init__(self, specs: Mapping[str, MetricSpec]) -> None:
-        self._specs: dict[str, MetricSpec] = dict(specs)
+    def __init__(self, specs: Mapping[str, MetricImplSpec]) -> None:
+        self._specs: dict[str, MetricImplSpec] = dict(specs)
 
-    def get(self, name: str) -> MetricSpec:
+    def get(self, name: str) -> MetricImplSpec:
         spec = self._specs.get(name)
         if spec is None:
             raise ValidationError(f"Unknown metric '{name}'")
@@ -36,7 +37,7 @@ class MetricRegistry:
     def list(self) -> list[str]:
         return sorted(self._specs.keys())
 
-    def resolve(self, names: Iterable[str]) -> list[MetricSpec]:
+    def resolve(self, names: Iterable[str]) -> list[MetricImplSpec]:
         resolved = []
         for name in names:
             resolved.append(self.get(name))

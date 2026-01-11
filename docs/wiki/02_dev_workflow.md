@@ -39,10 +39,28 @@ Typical variables for LLM-backed policies:
 - `LOG_LEVEL` (DEBUG/INFO/WARNING/ERROR)
 - `NGSPICE_PATH` (if ngspice not on PATH)
 
-## Running a minimal example
-We maintain a “golden” example under `examples/`.
+## Running a minimal example (current state)
+Today the repo ships a runnable AC demo:
 
-Target pattern:
+```bash
+python examples/run_ac_once.py
+```
+
+What it does:
+- Builds an AC deck from `examples/rc_lowpass.sp`
+- Runs ngspice via `NgspiceRunOperator` and writes results under `examples/output/runs/<run_id>/ac_example/`
+- Computes default AC metrics (`ac_mag_db_at_1k`, `ac_unity_gain_freq`)
+
+If ngspice is missing on PATH, the script will skip the run.
+
+Outputs to expect:
+- `runs/<run_id>/ac_example/deck_ac.sp`
+- `runs/<run_id>/ac_example/ac.csv`
+- `runs/<run_id>/ac_example/ngspice_ac.log`
+- Printed metric values
+
+## Future CLI target (not yet implemented)
+Planned `eesizer_cli` flow (design target, not present in repo yet):
 ```bash
 python -m eesizer_cli run \
   --netlist examples/circuits/ota.cir \
@@ -50,7 +68,7 @@ python -m eesizer_cli run \
   --out output/runs/
 ```
 
-Expected outputs:
+Expected outputs once CLI exists:
 - `output/runs/<run_id>/run_manifest.json`
 - logs (`logs/agent.log` or `logs/run.log`)
 - netlist snapshots (baseline + patched variants)

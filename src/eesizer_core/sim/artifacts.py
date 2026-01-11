@@ -16,9 +16,13 @@ class SpiceDeck:
     kind: SimKind
     # Mapping of logical name -> relative output file path expected from this deck.
     expected_outputs: Mapping[str, str] = field(default_factory=dict)
+    # Optional working directory for ngspice (for resolving .include paths).
+    workdir: Path | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "expected_outputs", MappingProxyType(dict(self.expected_outputs)))
+        if self.workdir is not None:
+            object.__setattr__(self, "workdir", Path(self.workdir))
 
 
 @dataclass
@@ -43,3 +47,18 @@ class RawSimData:
     def output_path(self, name: str) -> Path:
         """Helper to fetch an output path by logical name."""
         return self.outputs[name]
+
+
+@dataclass(frozen=True)
+class NetlistBundle:
+    """Netlist text + base_dir for resolving includes."""
+
+    text: str
+    base_dir: Path
+    include_files: tuple[Path, ...] = ()
+    extra_search_paths: tuple[Path, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "base_dir", Path(self.base_dir))
+        object.__setattr__(self, "include_files", tuple(Path(p) for p in self.include_files))
+        object.__setattr__(self, "extra_search_paths", tuple(Path(p) for p in self.extra_search_paths))

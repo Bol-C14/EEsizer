@@ -42,7 +42,12 @@ class NgspiceRunOperator(Operator):
 
     def _write_deck(self, deck: SpiceDeck, stage_dir: Path) -> Path:
         deck_path = stage_dir / f"deck_{deck.kind.value}.sp"
-        deck_path.write_text(deck.text, encoding="utf-8")
+        deck_text = deck.text
+        # Ensure wrdata targets land in stage_dir even if ngspice cwd differs.
+        for rel_path in deck.expected_outputs.values():
+            abs_path = stage_dir / rel_path
+            deck_text = deck_text.replace(rel_path, str(abs_path))
+        deck_path.write_text(deck_text, encoding="utf-8")
         return deck_path
 
     def _log_path(self, deck: SpiceDeck, stage_dir: Path) -> Path:
@@ -92,7 +97,7 @@ class NgspiceRunOperator(Operator):
                 text=True,
                 check=False,
                 timeout=self.timeout_s,
-                cwd=stage_dir,
+                cwd=deck.workdir or stage_dir,
             )
         except FileNotFoundError as exc:
             raise SimulationError(f"ngspice executable not found: {self.ngspice_bin}") from exc

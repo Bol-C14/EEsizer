@@ -8,7 +8,7 @@ import pandas as pd
 from ..contracts.errors import MetricError, ValidationError
 from ..contracts.enums import SimKind
 from ..sim.artifacts import RawSimData
-from .registry import MetricSpec
+from .registry import MetricImplSpec
 from .io import load_wrdata_table
 
 
@@ -39,7 +39,7 @@ def _first_crossing_from_above(freq: np.ndarray, values: np.ndarray, target: flo
     raise MetricError(f"No crossing found for target {target} dB")
 
 
-def _extract_ac(raw: RawSimData, spec: MetricSpec) -> Tuple[np.ndarray, np.ndarray]:
+def _extract_ac(raw: RawSimData, spec: MetricImplSpec) -> Tuple[np.ndarray, np.ndarray]:
     if raw.kind != SimKind.ac:
         raise ValidationError(f"AC metric '{spec.name}' requires SimKind.ac data")
     node = str(spec.params.get("node", "out"))
@@ -61,7 +61,7 @@ def _extract_ac(raw: RawSimData, spec: MetricSpec) -> Tuple[np.ndarray, np.ndarr
     return freq, mag_db_col
 
 
-def compute_ac_mag_db_at(raw: RawSimData, spec: MetricSpec) -> float:
+def compute_ac_mag_db_at(raw: RawSimData, spec: MetricImplSpec) -> float:
     target_hz = spec.params.get("target_hz")
     if target_hz is None:
         raise ValidationError("ac_mag_db_at requires 'target_hz' in params")
@@ -69,7 +69,7 @@ def compute_ac_mag_db_at(raw: RawSimData, spec: MetricSpec) -> float:
     return _interp_at(freq, mag_db, float(target_hz))
 
 
-def compute_unity_gain_freq(raw: RawSimData, spec: MetricSpec) -> float:
+def compute_unity_gain_freq(raw: RawSimData, spec: MetricImplSpec) -> float:
     freq, mag_db = _extract_ac(raw, spec)
     target = float(spec.params.get("target_db", 0.0))
     return _first_crossing_from_above(freq, mag_db, target)

@@ -7,11 +7,11 @@ import numpy as np
 from ..contracts.enums import SimKind
 from ..contracts.errors import MetricError, ValidationError
 from ..sim.artifacts import RawSimData
-from .registry import MetricSpec
+from .registry import MetricImplSpec
 from .io import load_wrdata_table
 
 
-def compute_dc_vout_last(raw: RawSimData, spec: MetricSpec) -> float:
+def compute_dc_vout_last(raw: RawSimData, spec: MetricImplSpec) -> float:
     if raw.kind != SimKind.dc:
         raise ValidationError(f"DC metric '{spec.name}' requires SimKind.dc data")
     dc_path = raw.outputs.get("dc_csv")
@@ -37,7 +37,7 @@ def compute_dc_vout_last(raw: RawSimData, spec: MetricSpec) -> float:
     return float(series.dropna().iloc[-1])
 
 
-def compute_dc_slope(raw: RawSimData, spec: MetricSpec) -> Tuple[float | None, dict]:
+def compute_dc_slope(raw: RawSimData, spec: MetricImplSpec) -> Tuple[float | None, dict]:
     """Approximate slope dV/dx using first/last samples; returns diagnostics on failure."""
 
     if raw.kind != SimKind.dc:

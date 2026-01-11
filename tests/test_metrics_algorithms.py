@@ -7,7 +7,7 @@ from eesizer_core.contracts.errors import MetricError, ValidationError
 from eesizer_core.sim.artifacts import RawSimData
 from eesizer_core.metrics import (
     DEFAULT_REGISTRY,
-    MetricSpec,
+    MetricImplSpec,
     compute_ac_mag_db_at,
     compute_unity_gain_freq,
     compute_dc_vout_last,
@@ -59,7 +59,7 @@ def _make_raw(tmp_path):
 
 def test_ac_mag_db_at(tmp_path):
     raw = _make_raw(tmp_path)["ac"]
-    spec = MetricSpec(
+    spec = MetricImplSpec(
         name="ac_mag_db_at_10",
         unit="dB",
         requires_kind=SimKind.ac,
@@ -73,7 +73,7 @@ def test_ac_mag_db_at(tmp_path):
 
 def test_unity_gain_freq(tmp_path):
     raw = _make_raw(tmp_path)["ac"]
-    spec = MetricSpec(
+    spec = MetricImplSpec(
         name="ac_unity_gain_freq",
         unit="Hz",
         requires_kind=SimKind.ac,
@@ -89,7 +89,7 @@ def test_compute_metrics_operator_with_registry(tmp_path):
     raw = _make_raw(tmp_path)["ac"]
     registry = MetricRegistry(
         {
-            "ac_mag_db_at_1k": MetricSpec(
+            "ac_mag_db_at_1k": MetricImplSpec(
                 name="ac_mag_db_at_1k",
                 unit="dB",
                 requires_kind=SimKind.ac,
@@ -116,7 +116,7 @@ def test_unknown_metric_raises(tmp_path):
 
 def test_dc_metrics(tmp_path):
     raw = _make_raw(tmp_path)["dc"]
-    spec_last = MetricSpec(
+    spec_last = MetricImplSpec(
         name="dc_vout_last",
         unit="V",
         requires_kind=SimKind.dc,
@@ -127,7 +127,7 @@ def test_dc_metrics(tmp_path):
     value = compute_dc_vout_last(raw, spec_last)
     assert value == pytest.approx(0.5)
 
-    spec_slope = MetricSpec(
+    spec_slope = MetricImplSpec(
         name="dc_slope",
         unit="V/V",
         requires_kind=SimKind.dc,
@@ -142,7 +142,7 @@ def test_dc_metrics(tmp_path):
 
 def test_tran_rise_time(tmp_path):
     raw = _make_raw(tmp_path)["tran"]
-    spec = MetricSpec(
+    spec = MetricImplSpec(
         name="tran_rise_time",
         unit="s",
         requires_kind=SimKind.tran,
