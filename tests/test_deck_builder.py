@@ -34,7 +34,7 @@ def test_deck_builder_injects_ac_control_block():
     deck_text = deck.text
     assert ".control" in deck_text
     assert "ac dec 5 10 100000" in deck_text
-    assert "wrdata ac.csv frequency real(v(out)) imag(v(out))" in deck_text
+    assert "wrdata __OUT__/ac.csv frequency real(v(out)) imag(v(out))" in deck_text
     assert deck_text.strip().endswith(".end")
 
 
@@ -63,7 +63,7 @@ def test_deck_builder_dc_block():
     assert deck.kind == SimKind.dc
     deck_text = deck.text
     assert "dc V1 0 1 0.5" in deck_text
-    assert "wrdata dc.csv v(in) v(out)" in deck_text
+    assert "wrdata __OUT__/dc.csv v(in) v(out)" in deck_text
     assert deck.expected_outputs["dc_csv"] == "dc.csv"
     assert deck.expected_outputs_meta["dc_csv"] == ("v(in)", "v(out)")
 
@@ -84,7 +84,7 @@ def test_deck_builder_tran_block():
     assert deck.kind == SimKind.tran
     deck_text = deck.text
     assert "tran 1e-06 0.001" in deck_text
-    assert "wrdata tran.csv time v(out)" in deck_text
+    assert "wrdata __OUT__/tran.csv time v(out)" in deck_text
     assert deck.expected_outputs["tran_csv"] == "tran.csv"
     assert deck.expected_outputs_meta["tran_csv"] == ("time", "v(out)")
 

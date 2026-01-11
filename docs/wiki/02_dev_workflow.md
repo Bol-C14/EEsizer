@@ -43,7 +43,12 @@ Typical variables for LLM-backed policies:
 Today the repo ships a runnable AC demo:
 
 ```bash
-python examples/run_ac_once.py
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -e .[dev]
+PYTHONPATH=src pytest -q
+PYTHONPATH=src python examples/run_ac_once.py
 ```
 
 What it does:

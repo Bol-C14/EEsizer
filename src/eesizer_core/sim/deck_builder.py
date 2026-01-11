@@ -11,6 +11,8 @@ from ..contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_
 from ..domain.spice.sanitize_rules import has_control_block
 from .artifacts import SpiceDeck, NetlistBundle
 
+OUTPUT_PLACEHOLDER = "__OUT__"
+
 
 def _format_value(v: Any) -> str:
     if isinstance(v, (int, float)):
@@ -100,7 +102,7 @@ class DeckBuildOperator(Operator):
             ".control",
             "set filetype=ascii",
             f"ac dec {p_per_dec_int} {_format_value(start)} {_format_value(stop)}",
-            f"wrdata ac.csv frequency {' '.join(self._ac_columns(output_nodes))}",
+            f"wrdata {OUTPUT_PLACEHOLDER}/ac.csv frequency {' '.join(self._ac_columns(output_nodes))}",
             "quit",
             ".endc",
         ]
@@ -132,7 +134,7 @@ class DeckBuildOperator(Operator):
             ".control",
             "set filetype=ascii",
             f"dc {source} {_format_value(start)} {_format_value(stop)} {_format_value(step)}",
-            f"wrdata dc.csv v({sweep_node}) {' '.join(f'v({n})' for n in output_nodes)}",
+            f"wrdata {OUTPUT_PLACEHOLDER}/dc.csv v({sweep_node}) {' '.join(f'v({n})' for n in output_nodes)}",
             "quit",
             ".endc",
         ]
@@ -150,7 +152,7 @@ class DeckBuildOperator(Operator):
             ".control",
             "set filetype=ascii",
             f"tran {_format_value(step)} {_format_value(stop)}",
-            f"wrdata tran.csv time {' '.join(f'v({n})' for n in output_nodes)}",
+            f"wrdata {OUTPUT_PLACEHOLDER}/tran.csv time {' '.join(f'v({n})' for n in output_nodes)}",
             "quit",
             ".endc",
         ]

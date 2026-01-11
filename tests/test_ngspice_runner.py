@@ -40,6 +40,32 @@ def test_ngspice_runner_success(monkeypatch, tmp_path):
     assert raw.outputs_meta["ac_csv"] == ("frequency", "real(v(out))", "imag(v(out))")
 
 
+def test_ngspice_runner_rewrites_only_wrdata(tmp_path):
+    workspace = tmp_path / "output"
+    ctx = RunContext(workspace_root=workspace)
+    deck_text = """* ac.csv mention should stay
+.control
+wrdata __OUT__/ac.csv frequency real(v(out)) imag(v(out))
+.endc
+.end
+"""
+    deck = SpiceDeck(
+        text=deck_text,
+        kind=SimKind.ac,
+        expected_outputs={"ac_csv": "ac.csv"},
+        expected_outputs_meta={"ac_csv": ("frequency", "real(v(out))", "imag(v(out))")},
+    )
+    op = NgspiceRunOperator(ngspice_bin="ngspice")
+    stage_dir = ctx.run_dir() / "stage"
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    deck_path = op._write_deck(deck, stage_dir)
+    content = deck_path.read_text(encoding="utf-8")
+    assert "__OUT__" not in content
+    assert str((ctx.run_dir() / "stage" / "ac.csv")) in content
+    # comment text unchanged
+    assert "* ac.csv mention should stay" in content
+
+
 def test_ngspice_runner_missing_binary(monkeypatch, tmp_path):
     workspace = tmp_path / "output"
     ctx = RunContext(workspace_root=workspace)

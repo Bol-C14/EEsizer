@@ -117,8 +117,11 @@ def validate_patch(
     ratio_errors: List[str] = []
     if wl_ratio_min is not None:
         for elem_name, loc in cir.param_locs.items():
-            if ".w" in elem_name or ".l" in elem_name:
-                base = elem_name.split(".")[0]
+            if elem_name.endswith(".w") or elem_name.endswith(".l"):
+                parts = elem_name.split(".")
+                if len(parts) < 2:
+                    continue
+                base = ".".join(parts[:-1])
                 w_id = f"{base}.w"
                 l_id = f"{base}.l"
                 if w_id in cir.param_locs and l_id in cir.param_locs:

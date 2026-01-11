@@ -10,16 +10,15 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = [
-  "numpy>=1.26",
-  "pandas>=2.1",
-  "matplotlib>=3.8",
-  "scipy>=1.11",
-  "python-dotenv>=1.0.0",
-  "openai>=1.0.0",
+  "numpy>=1.26,<2.1",
+  "pandas>=2.1,<2.3",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4", "ruff>=0.5", "mypy>=1.7"]
+llm = ["openai>=1.0.0", "python-dotenv>=1.0.0"]
+viz = ["matplotlib>=3.8"]
+opt = ["scipy>=1.11"]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -35,3 +34,8 @@ addopts = "-q"
 markers = [
   "integration: requires ngspice or external tools"
 ]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+per-file-ignores = {"**/__init__.py" = ["F401"]}

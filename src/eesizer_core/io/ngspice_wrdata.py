@@ -49,15 +49,25 @@ def load_wrdata_table(
     header_tokens: list[str] | None = None
     data_start = 0
 
-    first = lines[0]
-    if comment_prefix and first.startswith(comment_prefix):
-        header_tokens = _normalize_header(first, comment_prefix)
-        data_start = 1
-    else:
-        tokens = first.split()
+    for idx, line in enumerate(lines):
+        if comment_prefix and line.startswith(comment_prefix):
+            stripped = _normalize_header(line, comment_prefix)
+            if stripped and any(
+                t.lower().startswith(("freq", "time")) or "(" in t or ")" in t for t in stripped
+            ):
+                header_tokens = stripped
+                data_start = idx + 1
+                break
+            continue
+        tokens = line.split()
+        if not tokens:
+            continue
         if not _all_numeric(tokens):
             header_tokens = tokens
-            data_start = 1
+            data_start = idx + 1
+        else:
+            data_start = idx
+        break
 
     data_lines: list[str] = []
     for ln in lines[data_start:]:

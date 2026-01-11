@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -10,6 +11,7 @@ from ..contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_
 from ..contracts.enums import SimKind
 from ..runtime.context import RunContext
 from .artifacts import RawSimData, SpiceDeck
+from .deck_builder import OUTPUT_PLACEHOLDER
 
 
 def _tail(text: str, limit: int = 2000) -> str:
@@ -46,7 +48,13 @@ class NgspiceRunOperator(Operator):
         # Ensure wrdata targets land in stage_dir even if ngspice cwd differs.
         for rel_path in deck.expected_outputs.values():
             abs_path = stage_dir / rel_path
-            deck_text = deck_text.replace(rel_path, str(abs_path))
+            placeholder = f"{OUTPUT_PLACEHOLDER}/{rel_path}"
+            if placeholder in deck_text:
+                deck_text = deck_text.replace(placeholder, str(abs_path))
+            else:
+                # Precise replace only on wrdata filename position.
+                pattern = rf"(?im)^(\s*wrdata\s+){re.escape(rel_path)}(\s+)"
+                deck_text = re.sub(pattern, rf"\1{abs_path}\2", deck_text)
         deck_path.write_text(deck_text, encoding="utf-8")
         return deck_path
 
