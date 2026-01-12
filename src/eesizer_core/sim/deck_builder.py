@@ -85,7 +85,9 @@ class DeckBuildOperator(Operator):
         self.default_tran_step = default_tran_step
         self.default_tran_stop = default_tran_stop
 
-    def _build_ac_control(self, params: Mapping[str, Any]) -> tuple[list[str], tuple[str, ...], dict[str, tuple[str, ...]]]:
+    def _build_ac_control(
+        self, params: Mapping[str, Any]
+    ) -> tuple[list[str], tuple[str, ...], dict[str, str], dict[str, tuple[str, ...]]]:
         p_per_dec = params.get("points_per_decade", self.default_points_per_decade)
         start = params.get("start_hz", self.default_start_hz)
         stop = params.get("stop_hz", self.default_stop_hz)
