@@ -24,7 +24,7 @@ class CircuitSourceToNetlistBundleOperator(Operator):
             raise ValidationError("circuit_source must be a SPICE netlist")
 
         md = src.metadata or {}
-        base_dir = md.get("base_dir")
+        base_dir = md.get("base_dir") or "."
         include_files = md.get("include_files") or ()
         extra_search_paths = md.get("extra_search_paths") or ()
 
