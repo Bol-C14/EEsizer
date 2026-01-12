@@ -34,7 +34,7 @@ class MetricRegistry:
             raise ValidationError(f"Unknown metric '{name}'")
         return spec
 
-    def list(self) -> list[str]:
+    def available(self) -> list[str]:
         return sorted(self._specs.keys())
 
     def resolve(self, names: Iterable[str]) -> list[MetricImplSpec]:
