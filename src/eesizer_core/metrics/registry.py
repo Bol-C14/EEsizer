@@ -6,7 +6,7 @@ from typing import Callable, Iterable, Mapping
 from ..contracts.enums import SimKind
 from ..contracts.errors import ValidationError
 from ..sim.artifacts import RawSimData
-ComputeFn = Callable[[RawSimData, "MetricImplSpec"], float | None]
+ComputeFn = Callable[[RawSimData, "MetricImplSpec"], tuple[float | None, dict]]
 
 
 @dataclass(frozen=True)

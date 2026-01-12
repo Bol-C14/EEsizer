@@ -70,7 +70,7 @@ def test_ac_mag_db_at(tmp_path):
         compute_fn=compute_ac_mag_db_at,
         params={"target_hz": 10, "node": "out"},
     )
-    value = compute_ac_mag_db_at(raw, spec)
+    value, _ = compute_ac_mag_db_at(raw, spec)
     assert value == pytest.approx(0.0)
 
 
@@ -84,7 +84,8 @@ def test_unity_gain_freq(tmp_path):
         compute_fn=compute_unity_gain_freq,
         params={"node": "out"},
     )
-    value = compute_unity_gain_freq(raw, spec)
+    value, diag = compute_unity_gain_freq(raw, spec)
+    assert diag == {}
     assert value == pytest.approx(10.0)
 
 
@@ -127,7 +128,7 @@ def test_dc_metrics(tmp_path):
         compute_fn=compute_dc_vout_last,
         params={"node": "out"},
     )
-    value = compute_dc_vout_last(raw, spec_last)
+    value, _ = compute_dc_vout_last(raw, spec_last)
     assert value == pytest.approx(0.5)
 
     spec_slope = MetricImplSpec(

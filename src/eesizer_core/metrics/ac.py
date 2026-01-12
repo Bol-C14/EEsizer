@@ -65,18 +65,18 @@ def _extract_ac(raw: RawSimData, spec: MetricImplSpec) -> Tuple[np.ndarray, np.n
     return freq, mag_db_col
 
 
-def compute_ac_mag_db_at(raw: RawSimData, spec: MetricImplSpec) -> float:
+def compute_ac_mag_db_at(raw: RawSimData, spec: MetricImplSpec) -> tuple[float | None, dict]:
     target_hz = spec.params.get("target_hz")
     if target_hz is None:
         raise ValidationError("ac_mag_db_at requires 'target_hz' in params")
     freq, mag_db = _extract_ac(raw, spec)
-    return _interp_at(freq, mag_db, float(target_hz))
+    return _interp_at(freq, mag_db, float(target_hz)), {}
 
 
-def compute_unity_gain_freq(raw: RawSimData, spec: MetricImplSpec) -> float | tuple[float | None, dict]:
+def compute_unity_gain_freq(raw: RawSimData, spec: MetricImplSpec) -> tuple[float | None, dict]:
     freq, mag_db = _extract_ac(raw, spec)
     target = float(spec.params.get("target_db", 0.0))
     try:
-        return _first_crossing_from_above(freq, mag_db, target)
+        return _first_crossing_from_above(freq, mag_db, target), {}
     except MetricError as exc:
         return None, {"reason": str(exc)}

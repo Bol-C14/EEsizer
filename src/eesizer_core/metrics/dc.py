@@ -11,7 +11,7 @@ from ..io.ngspice_wrdata import load_wrdata_table
 from .registry import MetricImplSpec
 
 
-def compute_dc_vout_last(raw: RawSimData, spec: MetricImplSpec) -> float:
+def compute_dc_vout_last(raw: RawSimData, spec: MetricImplSpec) -> tuple[float | None, dict]:
     if raw.kind != SimKind.dc:
         raise ValidationError(f"DC metric '{spec.name}' requires SimKind.dc data")
     dc_path = raw.outputs.get("dc_csv")
@@ -34,7 +34,7 @@ def compute_dc_vout_last(raw: RawSimData, spec: MetricImplSpec) -> float:
     series = _pick_column(df, f"v({node})")
     if series.size == 0:
         raise MetricError("DC data empty for node")
-    return float(series.dropna().iloc[-1])
+    return float(series.dropna().iloc[-1]), {}
 
 
 def compute_dc_slope(raw: RawSimData, spec: MetricImplSpec) -> Tuple[float | None, dict]:
