@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from eesizer_core.contracts.enums import SimKind
-from eesizer_core.contracts.errors import MetricError, ValidationError
+from eesizer_core.contracts.errors import ValidationError
 from eesizer_core.sim.artifacts import RawSimData
 from eesizer_core.metrics import (
     DEFAULT_REGISTRY,

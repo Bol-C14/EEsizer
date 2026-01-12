@@ -28,3 +28,4 @@ def test_contracts_import_and_instantiate():
     assert ms.sim == SimKind.ac
     assert "ac_gain_db" in mb.values
     assert cfg.budget.max_iterations == 3
+    assert spec.objectives[0].metric == "ac_gain_db"

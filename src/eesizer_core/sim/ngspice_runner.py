@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import shutil
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -12,6 +13,8 @@ from ..contracts.enums import SimKind
 from ..runtime.context import RunContext
 from .artifacts import RawSimData, SpiceDeck
 from .deck_builder import OUTPUT_PLACEHOLDER
+
+_STAGE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _tail(text: str, limit: int = 2000) -> str:
@@ -45,6 +48,27 @@ def _resolve_output_path(rel_path: str, stage_dir: Path) -> Path:
     except ValueError as exc:
         raise ValidationError(f"expected_outputs path escapes stage_dir: {rel_path}") from exc
     return abs_path
+
+
+def _validate_stage_name(stage_name: str) -> str:
+    if not isinstance(stage_name, str):
+        raise ValidationError("stage must be a string if provided")
+    if not _STAGE_NAME_RE.match(stage_name):
+        raise ValidationError("stage name must match [A-Za-z0-9_-]+")
+    return stage_name
+
+
+def _probe_ngspice_version(ngspice_bin: str) -> Optional[str]:
+    """Best-effort version probe; non-fatal on failure."""
+    proc = subprocess.run(
+        [ngspice_bin, "-v"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    out = (proc.stdout or proc.stderr or "").strip()
+    return out or None
 
 
 class NgspiceRunOperator(Operator):
@@ -104,9 +128,7 @@ class NgspiceRunOperator(Operator):
         if ctx is None or not hasattr(ctx, "run_dir"):
             raise ValidationError("RunContext with run_dir() is required for ngspice runs")
 
-        stage_name = inputs.get("stage") or deck.kind.value
-        if not isinstance(stage_name, str):
-            raise ValidationError("stage must be a string if provided")
+        stage_name = _validate_stage_name(inputs.get("stage") or deck.kind.value)
 
         stage_dir = ctx.run_dir() / stage_name
         stage_dir.mkdir(parents=True, exist_ok=True)
@@ -118,10 +140,19 @@ class NgspiceRunOperator(Operator):
         deck_path = self._write_deck(deck, stage_dir, resolved_outputs)
         log_path = self._log_path(deck, stage_dir)
 
-        cmd = [self.ngspice_bin, "-b", "-o", str(log_path), str(deck_path)]
+        ngspice_path = shutil.which(self.ngspice_bin) or self.ngspice_bin
+
+        cmd = [ngspice_path, "-b", "-o", str(log_path), str(deck_path)]
 
         provenance = self._provenance_for_deck(deck)
         provenance.command = " ".join(cmd)
+        provenance.notes["ngspice_path"] = ngspice_path
+        try:
+            version = _probe_ngspice_version(ngspice_path)
+            if version:
+                provenance.notes["ngspice_version"] = version
+        except Exception as exc:  # pragma: no cover - defensive
+            provenance.notes["ngspice_version_error"] = str(exc)
 
         try:
             proc = subprocess.run(

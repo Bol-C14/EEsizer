@@ -7,7 +7,7 @@ from ..contracts.operators import Operator, OperatorResult
 from ..contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_json
 from ..contracts.artifacts import MetricValue, MetricsBundle
 from ..sim.artifacts import RawSimData
-from .registry import MetricRegistry, MetricImplSpec
+from .registry import MetricRegistry
 from .defaults import DEFAULT_REGISTRY
 
 

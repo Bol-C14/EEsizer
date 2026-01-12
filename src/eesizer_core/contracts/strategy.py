@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 from .artifacts import CircuitSource, CircuitSpec, RunResult
-from .enums import StopReason
 
 
 @dataclass(frozen=True)

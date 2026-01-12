@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Tuple
 
-import numpy as np
-
 from ..contracts.enums import SimKind
 from ..contracts.errors import MetricError, ValidationError
 from ..sim.artifacts import RawSimData

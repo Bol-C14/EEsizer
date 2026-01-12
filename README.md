@@ -20,7 +20,9 @@ This repository has been refactored from a legacy notebook-based codebase into a
 
 * ✅ **Step 1:** Contracts layer (Artifacts / Operators / Policy / Strategy / Errors / Provenance)
 * ✅ **Step 2:** SPICE netlist canonicalization + lightweight IR + topology signature guard
-* 🚧 **Step 3 (current target):** Patch substrate (policy outputs `Patch`, framework validates and applies safely)
+* ✅ **Step 3:** Patch substrate (parameter-only editing with topology/schema guards)
+* ✅ **Step 4:** Simulation stack (DeckBuildOperator + NgspiceRunOperator + ComputeMetricsOperator + metrics registry)
+* 🚧 **Next (Step 5):** Strategy/Policy loops (LLM/RL/BO) built on the operator stack
 
 > The `legacy/` directory contains old code and references.
 > New development happens in `src/eesizer_core/`.
@@ -64,13 +66,12 @@ EEsizer solves this by enforcing:
 │       │       ├── parse.py
 │       │       └── signature.py
 │       ├── operators/
-│       │   └── netlist/          # Operator wrappers: sanitize/index/signature (+ patch in Step3)
-│       │       ├── sanitize_operator.py
-│       │       ├── index_operator.py
-│       │       └── signature_operator.py
+│       │   └── netlist/          # Operator wrappers: sanitize/index/signature/patch_apply
+│       ├── sim/                  # Deck builder + ngspice runner + source adapter
+│       ├── metrics/              # Metric registry + compute operators + algorithms
+│       ├── io/                   # Shared IO helpers (e.g., wrdata loader)
 │       └── runtime/              # Runtime context, run ids, shared execution utilities
-│           └── context.py
-├── tests/                        # Pytest suite (contracts + spice domain + operators)
+├── tests/                        # Pytest suite (contracts + spice domain + operators + sim/metrics)
 ├── examples/                     # Minimal runnable examples / demos
 ├── legacy/                       # Legacy implementation (read-only reference)
 ├── pyproject.toml                # Packaging and dependencies
@@ -163,7 +164,7 @@ pip install -e ".[dev]"
 ### 4) Run tests
 
 ```bash
-pytest -q
+PYTHONPATH=src pytest -q
 ```
 
 > If you see `ModuleNotFoundError: eesizer_core`, it means the package is not installed in editable mode.
@@ -188,7 +189,7 @@ After container builds, dependencies will install automatically via `postCreateC
 
 ```bash
 pip install -e ".[dev]"
-pytest
+PYTHONPATH=src pytest
 ```
 
 ---
@@ -213,7 +214,19 @@ This ordering is enforced to prevent inconsistent IR/signature generation.
 
 ---
 
-## Step 3 Target: Patch Substrate (Parameter-only Editing)
+## Usage: Run AC sim + metrics (Step 4)
+
+End-to-end demo (requires `ngspice` on PATH):
+
+```bash
+PYTHONPATH=src python examples/run_ac_once.py
+```
+
+This builds an AC deck for `examples/rc_lowpass.sp`, runs ngspice into `examples/output/runs/<run_id>/ac_example`, and computes AC metrics (`ac_mag_db_at_1k`, `ac_unity_gain_freq`). If ngspice is missing, the example will skip gracefully.
+
+---
+
+## Step 3 Recap: Patch Substrate (Parameter-only Editing)
 
 ### Motivation
 
@@ -351,18 +364,13 @@ If you need includes, use controlled relative paths and avoid `..` and absolute 
 
 ## Roadmap (Short)
 
-* Step 3: Patch substrate
+* Step 5: Strategy / Policy loops
+  * selection of policies (LLM / RL / BO / heuristics)
+  * budgets/stop conditions
+  * provenance + experiment tracking
 
-  * Patch JSON schema + parsing
-  * Patch validation constraints (bounds/frozen/step limits)
-  * Deterministic apply using TokenLoc spans
-  * Guards: signature + schema invariants
-
-* Step 4+: Simulation and optimization loop
-
-  * ngspice operator
-  * metrics registry
-  * strategy loop (stop conditions, budgets)
+* Step 6+: Optimization and deployment
+  * richer metrics + corners
   * multi-agent orchestration (policy selection + tool calling)
   * integration toward node transfer workflows
 

@@ -1,0 +1,26 @@
+{
+  "run_id": "uuid",
+  "timestamp": "2026-01-11T00:00:00Z",
+  "inputs": {
+    "netlist_sha256": "…",
+    "spec_sha256": "…"
+  },
+  "environment": {
+    "python": "3.12",
+    "ngspice": "ngspice-xx",
+    "policy": "LLMPatchPolicy",
+    "model": "gpt-5"
+  },
+  "history": [
+    {
+      "iter": 0,
+      "patch": [],
+      "metrics": {"gain_db": 55.0, "pm_deg": 40.0},
+      "paths": {"deck": "…", "raw": "…"}
+    }
+  ],
+  "result": {
+    "status": "in_progress",
+    "best_iter": 0
+  }
+}

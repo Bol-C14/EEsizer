@@ -85,7 +85,7 @@ def validate_patch(
         if op.op == PatchOpType.set:
             try:
                 candidate_val = _parse_scalar_numeric(op.value)
-            except ValidationError as exc:
+            except ValidationError:
                 errors.append(f"param '{op.param}' has non-numeric patch value '{op.value}'")
                 candidate_val = None
         else:

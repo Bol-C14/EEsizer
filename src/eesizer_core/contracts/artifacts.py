@@ -187,6 +187,6 @@ class RunResult:
     """Final output of a strategy run."""
     best_source: Optional[CircuitSource] = None
     best_metrics: MetricsBundle = field(default_factory=MetricsBundle)
-    history: List[Dict[str, Any]] = field(default_factory=list)  # per-iteration records
+    history: list[Dict[str, Any]] = field(default_factory=list)  # per-iteration records
     stop_reason: Optional[StopReason] = None
     notes: Dict[str, Any] = field(default_factory=dict)

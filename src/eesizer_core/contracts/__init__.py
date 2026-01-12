@@ -1,3 +1,5 @@
+# ruff: noqa: F401, F403
+
 from .artifacts import (
     CircuitSource, CircuitSpec, Objective, Constraint,
     ParamDef, ParamSpace,

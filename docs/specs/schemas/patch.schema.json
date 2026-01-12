@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EEsizer Patch",
+  "type": "object",
+  "required": ["patch"],
+  "properties": {
+    "patch": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["param", "op", "value"],
+        "properties": {
+          "param": { "type": "string" },
+          "op": { "type": "string", "enum": ["set", "add", "mul"] },
+          "value": { "type": ["number", "string"] },
+          "why": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "stop": { "type": "boolean" },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}

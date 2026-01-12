@@ -39,6 +39,34 @@ def test_ngspice_runner_success(monkeypatch, tmp_path):
     assert "deck_ac.sp" in str(result.outputs["deck_path"])
     assert raw.returncode == 0
     assert raw.outputs_meta["ac_csv"] == ("frequency", "real(v(out))", "imag(v(out))")
+    assert result.provenance.notes.get("ngspice_path")
+
+
+def test_ngspice_runner_accepts_valid_stage(monkeypatch, tmp_path):
+    workspace = tmp_path / "output"
+    ctx = RunContext(workspace_root=workspace)
+    deck = SpiceDeck(
+        text="* test\n.end\n",
+        kind=SimKind.ac,
+        expected_outputs={"ac_csv": "ac.csv"},
+        expected_outputs_meta={"ac_csv": ("frequency", "real(v(out))", "imag(v(out))")},
+    )
+
+    def fake_run(cmd, capture_output, text, check, timeout, cwd):
+        for rel_path in deck.expected_outputs.values():
+            out_path = cwd / rel_path
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text("freq,mag\n1,0.0\n", encoding="utf-8")
+        (cwd / "ngspice_ac.log").write_text("log", encoding="utf-8")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    op = NgspiceRunOperator(ngspice_bin="ngspice")
+    result = op.run({"deck": deck, "stage": "ac_integration-01"}, ctx)
+    raw = result.outputs["raw_data"]
+    assert raw.run_dir.name == "ac_integration-01"
+    assert raw.outputs["ac_csv"].exists()
 
 
 def test_ngspice_runner_rewrites_only_wrdata(tmp_path):
@@ -123,3 +151,48 @@ def test_ngspice_runner_rejects_traversal_outputs(tmp_path):
     op = NgspiceRunOperator()
     with pytest.raises(ValidationError):
         op.run({"deck": deck}, ctx)
+
+
+def test_ngspice_runner_rejects_invalid_stage_name(monkeypatch, tmp_path):
+    workspace = tmp_path / "output"
+    ctx = RunContext(workspace_root=workspace)
+    deck = SpiceDeck(text="* test\n.end\n", kind=SimKind.ac, expected_outputs={"ac_csv": "ac.csv"})
+    called = False
+
+    def fake_run(*args, **kwargs):
+        nonlocal called
+        called = True
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    op = NgspiceRunOperator()
+    with pytest.raises(ValidationError, match="stage name"):
+        op.run({"deck": deck, "stage": "../evil"}, ctx)
+    assert called is False
+
+
+def test_ngspice_runner_records_version_best_effort(monkeypatch, tmp_path):
+    workspace = tmp_path / "output"
+    ctx = RunContext(workspace_root=workspace)
+    deck = SpiceDeck(text="* test\n.end\n", kind=SimKind.ac, expected_outputs={"ac_csv": "ac.csv"})
+
+    # Sim run
+    def fake_run(cmd, capture_output, text, check, timeout, cwd):
+        out_path = cwd / "ac.csv"
+        out_path.write_text("freq mag\n1 0\n", encoding="utf-8")
+        (cwd / "ngspice_ac.log").write_text("log", encoding="utf-8")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
+
+    # Probe version
+    def fake_probe(bin_path):
+        return "ngspice-foo"
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("eesizer_core.sim.ngspice_runner._probe_ngspice_version", fake_probe)
+    monkeypatch.setattr("eesizer_core.sim.ngspice_runner.shutil.which", lambda _: "/usr/bin/ngspice")
+
+    op = NgspiceRunOperator()
+    result = op.run({"deck": deck}, ctx)
+    assert result.provenance.notes["ngspice_path"] == "/usr/bin/ngspice"
+    assert result.provenance.notes["ngspice_version"] == "ngspice-foo"

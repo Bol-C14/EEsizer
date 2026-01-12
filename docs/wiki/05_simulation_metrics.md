@@ -4,21 +4,21 @@ This document standardises how we run simulators and compute metrics.
 
 ## 1) SimPlan
 SimPlan is the “what to run” spec:
-- sim types: `dc`, `ac`, `tran`, `op`
+- sim types: `dc`, `ac`, `tran` (SimKind.ams is reserved for future)
 - sweeps: frequency range, time step, etc.
 - outputs: which traces to save, which files to produce
 - corners: optional list of PVT corners
 
 ## 2) Operators (recommended split)
-1) `DeckBuildOperator`: `CircuitIR + SimPlan -> SpiceDeck`
+1) `DeckBuildOperator`: `CircuitIR/CircuitSource + SimPlan -> SpiceDeck`
 2) `NgspiceRunOperator`: `SpiceDeck -> RawSimData`
-3) `MetricOperator`: `RawSimData -> MetricValue`
+3) `ComputeMetricsOperator`: `RawSimData -> MetricsBundle`
 
 Do not merge these into a single mega-file.
 
 ### Deck/Runner rules (Step4)
-- `SpiceDeck.expected_outputs` names are always written to the run directory (`runs/<run_id>/<stage>/...`).
-- `SpiceDeck.expected_outputs_meta` records the wrdata column order (e.g., `("frequency", "vdb(out)", "vp(out)")`).
+- `SpiceDeck.expected_outputs` names are always written to the run directory (`<workspace_root>/runs/<run_id>/<stage>/...`).
+- `SpiceDeck.expected_outputs_meta` records the wrdata column order (e.g., `("frequency", "real(v(out))", "imag(v(out))")`).
 - `SpiceDeck.workdir` is mandatory when the source netlist uses relative `.include`/`.lib`; `NgspiceRunOperator` runs with `cwd=workdir` and rewrites wrdata targets to absolute paths under the run directory.
 
 ## 3) Metric registry
@@ -53,7 +53,7 @@ Metric operator must record:
 - which files were read
 - any fallback behavior (e.g., missing columns)
 
-## 7) wrdata file format (ngspice)
+## 6) wrdata file format (ngspice)
 - Files are whitespace-separated tables (often named `.csv` but not comma-separated).
 - Header handling:
   - If the first non-empty line starts with `*`, treat it as header (sans `*`).
@@ -62,5 +62,5 @@ Metric operator must record:
 - `load_wrdata_table` (in `eesizer_core/io/ngspice_wrdata.py`) is the single loader used by all metrics; do not reimplement parsing.
 - Metrics must raise clear errors when required columns are missing (no silent fallbacks).
 
-## 6) Known legacy issues to avoid
+## 7) Known legacy issues to avoid
 See `legacy/docs/code_review_2025-12-31.md` for prior metric correctness notes.

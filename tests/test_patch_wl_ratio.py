@@ -1,5 +1,3 @@
-import pytest
-
 from eesizer_core.contracts.artifacts import Patch, PatchOp
 from eesizer_core.contracts.enums import PatchOpType
 from eesizer_core.domain.spice.params import infer_param_space_from_ir

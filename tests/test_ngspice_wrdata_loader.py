@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from eesizer_core.io.ngspice_wrdata import load_wrdata_table
 
 

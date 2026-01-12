@@ -1,5 +1,7 @@
 # Ignore all folders named 'output'
 output/
+**/output/
+**/runs/
 
 # Ignore all folders named 'test'
 test/
