@@ -14,6 +14,7 @@ Contains the previous runnable implementation and historical run outputs.
 - `legacy/output/`: prior run artifacts (do not commit new outputs here)
 
 **Rule:** do not add new features under `legacy/`.
+**Tooling rule:** ruff/mypy/pytest are not run on `legacy/`; it is reference-only and excluded from quality gates.
 
 ### Refactor-track directories (new code)
 Current state:
