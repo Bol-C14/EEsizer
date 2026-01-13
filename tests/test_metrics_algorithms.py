@@ -118,6 +118,23 @@ def test_unknown_metric_raises(tmp_path):
         op.run({"raw_data": raw, "metric_names": ["missing_metric"]}, ctx=None)
 
 
+def test_missing_required_output_raises(tmp_path):
+    log_path = tmp_path / "ngspice.log"
+    log_path.write_text("", encoding="utf-8")
+    raw = RawSimData(
+        kind=SimKind.ac,
+        run_dir=tmp_path,
+        outputs={},
+        outputs_meta={},
+        log_path=log_path,
+        cmdline=[],
+        returncode=0,
+    )
+    op = ComputeMetricsOperator(registry=DEFAULT_REGISTRY)
+    with pytest.raises(ValidationError, match="requires output"):
+        op.run({"raw_data": raw, "metric_names": ["ac_mag_db_at_1k"]}, ctx=None)
+
+
 def test_dc_metrics(tmp_path):
     raw = _make_raw(tmp_path)["dc"]
     spec_last = MetricImplSpec(

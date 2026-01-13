@@ -51,6 +51,7 @@ def validate_patch(
     patch: Patch,
     *,
     wl_ratio_min: Optional[float] = None,
+    max_mul_factor: Optional[float] = 10.0,
 ) -> PatchValidationResult:
     """
     检查 patch 是否：
@@ -106,6 +107,10 @@ def validate_patch(
                 candidate_val = current_val + delta
             elif op.op == PatchOpType.mul:
                 candidate_val = current_val * delta
+                if max_mul_factor is not None and abs(delta) > max_mul_factor:
+                    errors.append(f"param '{op.param}' multiply factor {delta} exceeds max {max_mul_factor}")
+                if delta <= 0:
+                    errors.append(f"param '{op.param}' multiply factor must be positive")
 
         if candidate_val is not None:
             candidate_values[pid] = candidate_val

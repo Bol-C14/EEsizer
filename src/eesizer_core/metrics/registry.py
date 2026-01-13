@@ -26,7 +26,14 @@ class MetricRegistry:
     """Lookup and resolve metric specs by name."""
 
     def __init__(self, specs: Mapping[str, MetricImplSpec]) -> None:
-        self._specs: dict[str, MetricImplSpec] = dict(specs)
+        normalized: dict[str, MetricImplSpec] = {}
+        for name, spec in specs.items():
+            if spec.name != name:
+                raise ValidationError(f"Metric name mismatch: key '{name}' vs spec.name '{spec.name}'")
+            if name in normalized:
+                raise ValidationError(f"Duplicate metric '{name}' in registry")
+            normalized[name] = spec
+        self._specs = normalized
 
     def get(self, name: str) -> MetricImplSpec:
         spec = self._specs.get(name)

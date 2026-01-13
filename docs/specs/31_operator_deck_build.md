@@ -34,6 +34,12 @@ Optional inputs:
 - `deck: SpiceDeck`
 - `output_nodes: tuple[str, ...]`
 
+## Wrdata outputs (standardized)
+
+- **AC**: writes `ac.csv` with columns `frequency`, `real(v(<node>))`, `imag(v(<node>))` for each requested output node (Hz, volts).
+- **DC**: writes `dc.csv` with columns `v(<sweep_node>)` followed by `v(<node>)` for each output node (volts).
+- **TRAN**: writes `tran.csv` with columns `time` (seconds) followed by `v(<node>)` for each output node (volts).
+
 ## Validation rules
 
 - input netlist MUST NOT already contain `.control/.endc` blocks.

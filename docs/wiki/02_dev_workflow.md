@@ -3,31 +3,29 @@
 This doc describes how to develop, test, and run EEsizer in a reproducible way.
 
 ## Recommended environment: VSCode Dev Container
-A devcontainer is provided under `.devcontainer/` (Ubuntu + Python + ngspice).
+A devcontainer is provided under `.devcontainer/` (Ubuntu + Python + ngspice) and builds from the bundled `Dockerfile`.
 
 1. Open the repo in VSCode
-2. “Reopen in Container”
-3. In the container terminal:
+2. “Reopen in Container” (it will build the image from the Dockerfile)
+3. The devcontainer runs `postCreateCommand` automatically (`python -m pip install -e ".[dev]"`). If it fails (network / resolver issues), rerun manually:
 
 ```bash
 python3 -m pip install -U pip
-python3 -m pip install -e .[dev]
+python3 -m pip install -e ".[dev]"
 pytest -q
 ```
-
-> If `pyproject.toml` is not yet present, add it as part of the refactor track (see [08_migration_legacy.md](08_migration_legacy.md)).
 
 ## Local environment (without container)
 Requirements:
 - Python 3.11+ (3.12 recommended)
-- `ngspice` installed and available on PATH (or provide `NGSPICE_PATH`)
+- `ngspice` installed and available on PATH
 
 Suggested setup:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
-pip install -e .[dev]
+pip install -e ".[dev]"
 ```
 
 ## Environment variables
@@ -37,7 +35,7 @@ Typical variables for LLM-backed policies:
 - `LLM_FUNCTION_MODEL` (optional)
 - `LLM_TEMPERATURE` (default: 1)
 - `LOG_LEVEL` (DEBUG/INFO/WARNING/ERROR)
-- `NGSPICE_PATH` (if ngspice not on PATH)
+- ngspice must be available on PATH (advanced: pass `ngspice_bin=...` when constructing `NgspiceRunOperator`)
 
 ## Running a minimal example (current state)
 Today the repo ships a runnable AC demo:
@@ -46,7 +44,7 @@ Today the repo ships a runnable AC demo:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
-pip install -e .[dev]
+pip install -e ".[dev]"
 PYTHONPATH=src pytest -q
 PYTHONPATH=src python examples/run_ac_once.py
 ```

@@ -24,21 +24,24 @@ This doc specifies how EEsizer represents **what may change** and **how it chang
 **Fields**
 - `params: tuple[ParamDef, ...]`
 
+**Helpers**
+- `ParamSpace.build(params)` builds the index (de-duping by `param_id`).
+- `contains(param_id)` -> bool
+- `get(param_id)` -> ParamDef | None
+
 **Invariants**
 - Param IDs MUST be unique.
 - Frozen parameters MUST remain unchanged.
-
-`ParamSpace.build()` MUST de-duplicate by `param_id` and raise on duplicates.
 
 ## 22.3 PatchOp
 
 **Type:** `eesizer_core.contracts.artifacts.PatchOp`
 
 **Fields**
-- `param_id: str`
-- `value: float`
-- `mode: str = "set"`  
-  Reserved for future modes. Today only `"set"` is supported.
+- `param: str` (stable param id from ParamSpace)
+- `op: PatchOpType` (`set`, `add`, `mul`)
+- `value: Scalar` (number or string such as `"180n"`)
+- `why: str` (optional rationale)
 
 ## 22.4 Patch
 
@@ -46,12 +49,19 @@ This doc specifies how EEsizer represents **what may change** and **how it chang
 
 **Fields**
 - `ops: tuple[PatchOp, ...]`
-- `metadata: dict[str, Any] | None`  
-  For policy explanations (reasoning summary, confidence, etc.).
+- `stop: bool` (policy hint; optional)
+- `notes: str` (free-form policy notes)
+
+**Serialization note**
+- The JSON schema uses top-level key `"patch"` for the ops list; inside the code/dataclass this is `ops`.
 
 **Invariants**
 - Patch MUST be safe to apply mechanically.
 - Patch MUST NOT contain changes outside the ParamSpace.
+- Multiplicative ops must use positive factors and are clamped by a max factor (default 10.0) during validation.
+
+**Fingerprint**
+- `Patch.fingerprint()` hashes the ops list (param/op/value/why) plus `stop`/`notes`.
 
 ## 22.5 Patch-only protocol (the ban on full-netlist rewriting)
 
@@ -63,7 +73,6 @@ Rationale:
 - improves traceability (small diffs)
 
 A JSON schema is provided at:
-- `docs/specs/schemas/patch.schema.json (mirrored from docs/templates/patch.schema.json)`
+- `docs/specs/schemas/patch.schema.json`
 
 Strategies SHOULD validate policy outputs against this schema.
-

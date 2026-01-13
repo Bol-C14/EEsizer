@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ==== 配置区 ====
+# ==== 配置区 ====（可选本地 docker 辅助脚本；推荐首选 VSCode Dev Container）
 IMAGE_NAME="eesizer-dev:local"
 CONTAINER_NAME="eesizer-dev"
 DOCKERFILE_PATH=".devcontainer/Dockerfile"

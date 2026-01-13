@@ -183,7 +183,7 @@ We support a VSCode Dev Container workflow to avoid environment drift across tea
 * Docker Desktop / Docker Engine
 
 2. Open repository in VSCode
-3. Run: **Dev Containers: Reopen in Container**
+3. Run: **Dev Containers: Reopen in Container** (the image builds from `.devcontainer/Dockerfile`)
 
 After container builds, dependencies will install automatically via `postCreateCommand`. If you need to rerun manually:
 

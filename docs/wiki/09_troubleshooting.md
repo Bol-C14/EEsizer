@@ -1,7 +1,7 @@
 # Troubleshooting
 
 ## ngspice not found
-- Install ngspice or set `NGSPICE_PATH`
+- Install ngspice and ensure it is available on PATH (advanced: pass `ngspice_bin=...` to `NgspiceRunOperator`)
 - In container: ensure `apt-get install ngspice` is present
 
 ## Simulation outputs missing

@@ -34,12 +34,18 @@ def test_ngspice_runner_success(monkeypatch, tmp_path):
     result = op.run({"deck": deck}, ctx)
 
     raw = result.outputs["raw_data"]
+    prov = result.provenance
     assert raw.outputs["ac_csv"].exists()
     assert raw.log_path.exists()
     assert "deck_ac.sp" in str(result.outputs["deck_path"])
     assert raw.returncode == 0
     assert raw.outputs_meta["ac_csv"] == ("frequency", "real(v(out))", "imag(v(out))")
-    assert result.provenance.notes.get("ngspice_path")
+    assert prov.notes.get("ngspice_path")
+    assert prov.notes.get("cwd")
+    assert prov.notes.get("returncode") == 0
+    assert "stdout_tail" in prov.notes
+    assert "stderr_tail" in prov.notes
+    assert "log_path" in prov.outputs
 
 
 def test_ngspice_runner_accepts_valid_stage(monkeypatch, tmp_path):

@@ -8,10 +8,11 @@ Metrics translate simulator evidence into comparable numbers.
 
 Fields:
 - `name: str` (unique key)
+- `unit: str`
+- `sim: SimKind` (required simulation kind)
+- `required_files: tuple[str, ...]` (logical output names, e.g., `"ac_csv"`)
 - `description: str`
-- `unit: str` (free-form)
-- `sim_kind: SimKind | None`  
-  If set, the metric requires evidence from that simulation kind.
+- `params: dict[str, Any]`
 
 ## 24.2 MetricValue
 
@@ -19,30 +20,33 @@ Fields:
 
 Fields:
 - `name: str`
-- `value: float`
+- `value: float | None`
 - `unit: str`
-- `meta: dict[str, Any] | None`
-
-`meta` can include uncertainties, fit quality, corner labels, etc.
+- `passed: bool | None`
+- `details: dict[str, Any]`
 
 ## 24.3 MetricsBundle
 
 **Type:** `eesizer_core.contracts.artifacts.MetricsBundle`
 
 Fields:
-- `values: tuple[MetricValue, ...]`
+- `values: dict[str, MetricValue]`
 
-Convenience method:
-- `MetricsBundle.as_dict() -> dict[str, float]`
+Helpers:
+- `get(name)` -> `MetricValue | None`
 
 ## 24.4 Implementation specs in the registry
 
-The metric registry uses an internal implementation spec:
+The metric registry uses an implementation spec:
 - `eesizer_core.metrics.registry.MetricImplSpec`
 
 Fields:
-- `spec: MetricSpec`
-- `compute: (RawSimData) -> MetricValue`
+- `name: str`
+- `unit: str`
+- `requires_kind: SimKind`
+- `requires_outputs: tuple[str, ...]`
+- `compute_fn: Callable[[RawSimData, MetricImplSpec], tuple[float | None, dict]]`
+- `params: dict[str, Any]`
+- `description: str`
 
-The registry enforces a single global name per metric.
-
+The registry enforces a single global name per metric (registry key must match `spec.name`). Metrics MUST validate required outputs and raise structured errors on missing data.

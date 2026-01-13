@@ -16,12 +16,13 @@ Required:
 - `source: CircuitSource`
 - `param_space: ParamSpace`
 - `patch: Patch`
+- Source netlists containing `.control/.endc` are rejected.
 
 ## Outputs
 
-- `circuit_source: CircuitSource` (same kind)
+- `source: CircuitSource` (patched, same kind/name/metadata)
 - `circuit_ir: CircuitIR` (normalized IR after patch)
-- `topology_signature: str` (ToplogySignature.value)
+- `topology_signature: str`
 
 ## Topology invariance
 
@@ -36,10 +37,13 @@ The signature is defined in `eesizer_core.domain.spice.signature`.
 Patch apply MUST be mechanical:
 - only token-level replacements at `TokenLoc`s
 - no heuristic regex on arbitrary lines unless strictly bounded and tested
+- no edits to element names, node lists, `.include`, `.control`, or analysis directives.
+- validation enforces bounds/frozen/unknown params and step constraints (mul factors must be positive and below the configured max).
 
 ## Provenance
 
 Must include:
 - original netlist fingerprint
+- param space fingerprint (param ids)
 - patch fingerprint
-- topology signature before/after
+- topology signature before/after (and fingerprints of patched IR/netlist)

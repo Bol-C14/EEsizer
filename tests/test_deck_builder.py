@@ -100,3 +100,17 @@ def test_deck_builder_preserves_base_dir():
     )
     deck = DeckBuildOperator().run({"circuit_source": circuit_source, "sim_plan": plan}, ctx=None).outputs["deck"]
     assert deck.workdir == base_dir
+
+
+def test_deck_builder_rejects_control_block():
+    netlist = """
+V1 in 0 1
+.control
+echo hello
+.endc
+.end
+"""
+    plan = SimPlan(sims=(SimRequest(kind=SimKind.ac, params={"output_nodes": ["out"]}),))
+    op = DeckBuildOperator()
+    with pytest.raises(ValidationError, match="must not contain .control"):
+        op.run({"netlist_text": netlist, "sim_plan": plan}, ctx=None)

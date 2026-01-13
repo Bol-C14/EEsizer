@@ -48,3 +48,6 @@ The operator MUST record:
 - return code
 - ngspice resolved path (`shutil.which`) in `notes["ngspice_path"]`
 - best-effort ngspice version (`ngspice -v`) in `notes["ngspice_version"]` (non-fatal if probing fails)
+- working directory used for ngspice (`notes["cwd"]`)
+- stdout/stderr tails (`notes["stdout_tail"]` / `notes["stderr_tail"]`)
+- log path hash in outputs (`log_path`)

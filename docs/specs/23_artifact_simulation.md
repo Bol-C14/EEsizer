@@ -36,7 +36,9 @@ This is a convenience wrapper when a netlist is paired with a base directory use
 
 Fields:
 - `text: str`
-- `base_dir: Path | None`
+- `base_dir: Path`
+- `include_files: tuple[Path, ...]` (optional explicit include list)
+- `extra_search_paths: tuple[Path, ...]`
 
 ## 23.4 SpiceDeck
 
@@ -48,8 +50,8 @@ Fields:
 - `kind: SimKind`
 - `expected_outputs: dict[str, str]`  
   Mapping from logical key to **relative path** (within a stage dir). Example: `{ "ac_csv": "ac.csv" }`.
-- `expected_outputs_meta: dict[str, dict[str, Any]]`  
-  Per-output metadata (for example column names and units).
+- `expected_outputs_meta: dict[str, tuple[str, ...]]`  
+  Per-output ordered column names for wrdata outputs.
 - `workdir: Path | None`  
   Directory used as ngspice CWD when running (defaults to stage dir).
 
@@ -65,7 +67,7 @@ Fields:
 - `kind: SimKind`
 - `run_dir: Path` (the stage directory)
 - `outputs: dict[str, Path]` (absolute paths)
-- `outputs_meta: dict[str, dict[str, Any]]`
+- `outputs_meta: dict[str, tuple[str, ...]]`
 - `log_path: Path`
 - `cmdline: list[str]`
 - `returncode: int`
@@ -75,4 +77,3 @@ Fields:
 **Invariants**
 - Every `outputs[*]` path MUST exist.
 - Every `outputs[*]` path MUST be within `run_dir`.
-

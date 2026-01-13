@@ -52,45 +52,69 @@ Step 4 completion requires tightening a few gaps so the contract is unambiguous.
 ### C. Testing gaps (must fix)
 
 1. **Unit tests for PatchApplyOperator**
-   - Status: ⚠️ partial; add explicit tests for invalid param, frozen, bounds, topology mismatch.
+   - Status: ✅ covered by domain + operator tests.
+   - How to verify: `pytest -q tests/test_step3_patch_domain.py tests/test_step3_patch_operator.py`
 
 2. **Integration test for end-to-end loop skeleton (minimal)**
-   - Status: ⚠️ pending; need a minimal strategy/example that builds deck -> runs ngspice -> computes metric -> returns RunResult.
+   - Status: ✅ provided via examples + integration test.
+   - How to verify: `python examples/run_ac_once.py` (requires ngspice); `pytest -q -m integration`
 
 3. **Golden fixture for parsing and patching**
-   - Status: ⚠️ pending; add tiny SPICE fixture and expected patch diff.
+   - Status: ✅ fixtures exist (examples netlists + tests CSV fixtures); inline netlists in patch tests cover parsing/apply.
+   - How to verify: `pytest -q tests/test_step3_patch_domain.py tests/test_step3_patch_operator.py`
 
 ### D. CI and developer ergonomics (strongly recommended)
 
 1. Add a CI workflow that runs:
    - `ruff check`
    - `pytest -q` (unit only)
-   - Status: ⚠️ pending
+   - Status: ✅ CI present at `.github/workflows/ci.yml`
 
 2. Add a Makefile or just document commands in `docs/wiki/02_dev_workflow.md`:
    - `make test`
    - `make lint`
-   - Status: ⚠️ pending
+   - Status: ✅ commands documented in `docs/wiki/02_dev_workflow.md` (no Makefile required)
 
-## 90.3 Step-by-step execution plan
+## 90.3 Step-by-step execution plan (current repo)
 
-Execute in this order:
+This section reflects the **current state** of the repo. Use it as a repeatable workflow when making changes.
 
-1. **Docs landing**
-   - Ensure `docs/specs/00_index.md` links resolve.
+1. **Verify the baseline locally**
+   - Run the exact commands in **90.35 How to verify**.
 
-2. **Fix typing + validation**
-   - Apply the code fixes in section 90.2.B.
+2. **When you change any contract (Artifact/Operator)**
+   - Update the corresponding doc under `docs/specs/`.
+   - Add/adjust at least one unit test covering the new behaviour.
 
-3. **Add tests**
-   - Start with PatchApplyOperator unit tests.
-   - Add minimal fixtures.
+3. **When you change simulation outputs / wrdata columns**
+   - Update `docs/specs/*` output contracts.
+   - Update CSV fixtures under `tests/fixtures/` if needed.
+   - Ensure metrics tests still pass.
 
-4. **Add the minimal end-to-end example**
-   - Not a full optimiser, just a smoke test.
+4. **When you change dev workflow (devcontainer/CI/tool deps)**
+   - Update `docs/wiki/02_dev_workflow.md`.
+   - Ensure CI remains green.
 
-5. **Add CI**
-   - Make it run on PRs and main.
+5. **Optional improvements (track explicitly)**
+   - Formatting policy (`ruff format`) and mypy enforcement decisions.
+
+## 90.35 How to verify (exact commands)
+
+Patch validation + topology guard:
+- `pytest -q tests/test_step3_patch_domain.py`
+- `pytest -q tests/test_step3_patch_operator.py`
+- `pytest -q tests/test_step2_ir_signature.py`
+
+Simulation runner + staging + provenance:
+- `pytest -q tests/test_ngspice_runner.py`
+- `pytest -q tests/test_ngspice_wrdata_loader.py`
+
+Metrics (fixture-based):
+- `pytest -q tests/test_metrics_algorithms.py`
+
+End-to-end smoke (requires ngspice):
+- `python examples/run_ac_once.py`
+- `pytest -q -m integration`
 
 ## 90.4 Acceptance criteria
 

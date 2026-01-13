@@ -37,4 +37,4 @@ This index is the navigation hub for the **EEsizer Core** contract.
 ## Step 4: gaps, fixes, acceptance
 
 - [90_step4_fixlist_and_acceptance.md](90_step4_fixlist_and_acceptance.md)
-
+- [91_step4_definition_of_done.md](91_step4_definition_of_done.md)

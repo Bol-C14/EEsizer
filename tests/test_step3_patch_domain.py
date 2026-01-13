@@ -103,3 +103,33 @@ def test_validate_patch_bounds():
     result = validate_patch(cir, ps, patch)
     assert not result.ok
     assert any("above upper" in e for e in result.errors)
+
+
+def test_validate_patch_rejects_illegal_op():
+    netlist = "M1 d g s b nmos W=1u L=0.1u\n"
+    cir = topology_signature(netlist).circuit_ir
+    ps = ParamSpace.build([ParamDef(param_id="m1.w")])
+    patch = Patch(ops=(PatchOp(param="m1.w", op="divide", value="2"),))  # type: ignore[arg-type]
+    result = validate_patch(cir, ps, patch)
+    assert not result.ok
+    assert any("unsupported op" in e for e in result.errors)
+
+
+def test_validate_patch_rejects_non_numeric_value():
+    netlist = "M1 d g s b nmos W=1u L=0.1u\n"
+    cir = topology_signature(netlist).circuit_ir
+    ps = ParamSpace.build([ParamDef(param_id="m1.w")])
+    patch = Patch(ops=(PatchOp(param="m1.w", op=PatchOpType.set, value="abc"),))
+    result = validate_patch(cir, ps, patch)
+    assert not result.ok
+    assert any("non-numeric" in e for e in result.errors)
+
+
+def test_validate_patch_rejects_large_mul_factor():
+    netlist = "M1 d g s b nmos W=1u L=0.1u\n"
+    cir = topology_signature(netlist).circuit_ir
+    ps = ParamSpace.build([ParamDef(param_id="m1.w")])
+    patch = Patch(ops=(PatchOp(param="m1.w", op=PatchOpType.mul, value=20.0),))
+    result = validate_patch(cir, ps, patch)
+    assert not result.ok
+    assert any("exceeds max" in e for e in result.errors)

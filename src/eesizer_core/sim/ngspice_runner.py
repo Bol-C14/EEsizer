@@ -147,6 +147,7 @@ class NgspiceRunOperator(Operator):
         provenance = self._provenance_for_deck(deck)
         provenance.command = " ".join(cmd)
         provenance.notes["ngspice_path"] = ngspice_path
+        provenance.notes["cwd"] = str(deck.workdir or stage_dir)
         try:
             version = _probe_ngspice_version(ngspice_path)
             if version:
@@ -170,6 +171,9 @@ class NgspiceRunOperator(Operator):
 
         stdout_tail = _tail(proc.stdout or "")
         stderr_tail = _tail(proc.stderr or "")
+        provenance.notes["stdout_tail"] = stdout_tail
+        provenance.notes["stderr_tail"] = stderr_tail
+        provenance.notes["returncode"] = proc.returncode
 
         if proc.returncode != 0 and self.fail_on_nonzero_returncode:
             raise SimulationError(
@@ -209,6 +213,9 @@ class NgspiceRunOperator(Operator):
                 }
             )
         )
+        provenance.outputs["log_path"] = ArtifactFingerprint(sha256=stable_hash_str(str(log_path)))
+        provenance.outputs["stdout_tail"] = ArtifactFingerprint(sha256=stable_hash_str(stdout_tail))
+        provenance.outputs["stderr_tail"] = ArtifactFingerprint(sha256=stable_hash_str(stderr_tail))
         provenance.finish()
 
         return OperatorResult(

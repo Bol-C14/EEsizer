@@ -30,11 +30,16 @@ Rules:
 Fields:
 - `operator: str`
 - `version: str`
+- `start_time: float`
+- `end_time: float | None`
 - `command: str | None`
 - `inputs: dict[str, ArtifactFingerprint]`
 - `outputs: dict[str, ArtifactFingerprint]`
-- `meta: dict[str, Any]`
-- `started_at` / `finished_at`
+- `notes: dict[str, Any]`
+
+Helpers:
+- `finish()` sets `end_time`.
+- `duration_s()` returns elapsed seconds if finished.
 
 ### Requirements
 
@@ -49,17 +54,31 @@ For tool operators (ngspice, formal engines):
 - input artifact hashes
 - deck/netlist hash
 - tool binary/version string if available
-- command line
-- output file hashes or at least stable paths + return code
+- command line and working directory
+- return code and output file paths
 
-## 25.4 RunResult
+## 25.4 RunManifest
+
+**Type:** `eesizer_core.contracts.provenance.RunManifest`
+
+Fields:
+- `run_id: str`
+- `workspace: Path`
+- `seed: int | None`
+- `tool_versions: dict[str, str]`
+- `env: dict[str, str]`
+- `notes: dict[str, Any]`
+
+Helpers:
+- `save_json(path: Path)` writes a JSON manifest (parents created).
+
+## 25.5 RunResult
 
 **Type:** `eesizer_core.contracts.artifacts.RunResult`
 
 Fields:
-- `success: bool`
-- `final_metrics: MetricsBundle | None`
-- `history: list[dict[str, Any]]`
-- `messages: tuple[str, ...]`
-
-`history` is intended to contain step-by-step records (iteration number, patch, metrics, etc.) produced by strategies.
+- `best_source: CircuitSource | None`
+- `best_metrics: MetricsBundle`
+- `history: list[dict[str, Any]]` (per-iteration records)
+- `stop_reason: StopReason | None`
+- `notes: dict[str, Any]`

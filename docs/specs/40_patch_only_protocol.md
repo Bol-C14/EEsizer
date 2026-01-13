@@ -16,14 +16,14 @@ A policy takes:
 - observations (metrics, logs)
 
 And returns:
-- a Patch: `{ ops: [{param_id, value, mode}], metadata... }`
+- a Patch: `{ "patch": [{"param": ..., "op": "set|add|mul", "value": ..., "why": "..."}], "stop": false, "notes": "" }`
 
 ## 40.2 Enforcement points
 
 The protocol is enforced at three levels:
 1. JSON schema validation (structure)
 2. param space validation (only allowed params, bounds, frozen)
-3. topology validation (no structure drift)
+3. topology validation (no structure drift; signature before == after)
 
 ## 40.3 Recommended LLM IO pattern
 

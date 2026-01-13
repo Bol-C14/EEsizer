@@ -9,8 +9,8 @@ Compute a set of metrics from `RawSimData` using the metric registry.
 ## Inputs
 
 - `raw_data: RawSimData` (required)
-- `metric_names: Sequence[str] | None` (optional)
-  If omitted, compute all metrics that match `raw_data.kind`.
+- `metric_names: Sequence[str] | str` (required)
+  The operator resolves these names via the registry.
 
 ## Outputs
 
@@ -20,7 +20,8 @@ Compute a set of metrics from `RawSimData` using the metric registry.
 
 The operator uses `MetricRegistry`:
 - metric names must be unique
-- metrics may declare `sim_kind` to restrict compatibility
+- metrics declare `requires_kind` and `requires_outputs`
+- missing required outputs MUST raise `ValidationError`
 
 ## Failure modes
 

@@ -8,6 +8,7 @@ from ...contracts.operators import Operator, OperatorResult
 from ...contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_json, stable_hash_str
 from ...domain.spice.patching import apply_patch_with_topology_guard, validate_patch
 from ...domain.spice.signature import topology_signature
+from ...domain.spice.sanitize_rules import has_control_block
 
 
 def _param_locs_payload(param_locs: dict[str, TokenLoc]) -> dict[str, object]:
@@ -42,6 +43,9 @@ class PatchApplyOperator(Operator):
         patch = inputs.get("patch")
         if not isinstance(patch, Patch):
             raise ValidationError("PatchApplyOperator: 'patch' must be Patch")
+
+        if has_control_block(src.text):
+            raise ValidationError("PatchApplyOperator: source netlist must not contain .control/.endc blocks")
 
         sig = topology_signature(src.text, include_paths=self._include_paths)
         cir = sig.circuit_ir

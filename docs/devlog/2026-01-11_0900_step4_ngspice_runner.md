@@ -22,6 +22,6 @@
 
 ## Notes / Next Steps
 
-- Deck builder and metrics operators are still pending; runner currently trusts the deck’s `expected_outputs`.
+- Deck builder and metrics operators live in separate modules; runner trusts the deck’s `expected_outputs`.
 - When running tests locally without installing the package, set `PYTHONPATH=src` (devcontainer flow uses `pip install -e .[dev]`).
 - Next PRs in Step4: deck builder operator, metric operators, and integration example using `RunContext` staging.
