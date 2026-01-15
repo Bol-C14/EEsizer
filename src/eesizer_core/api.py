@@ -39,6 +39,8 @@ from .contracts.operators import Operator, OperatorResult
 from .contracts.policy import Policy, Observation
 from .contracts.strategy import Strategy, StrategyConfig, OptimizationBudget
 from .contracts.provenance import ArtifactFingerprint, Provenance, RunManifest
+from .strategies import PatchLoopStrategy, evaluate_objectives
+from .policies import FixedSequencePolicy, RandomNudgePolicy
 from .sim import (
     DeckBuildOperator,
     NgspiceRunOperator,
@@ -98,6 +100,12 @@ __all__ = [
     "Strategy",
     "StrategyConfig",
     "OptimizationBudget",
+    # strategies
+    "PatchLoopStrategy",
+    "evaluate_objectives",
+    # policies
+    "FixedSequencePolicy",
+    "RandomNudgePolicy",
     # provenance
     "ArtifactFingerprint",
     "Provenance",

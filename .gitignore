@@ -60,3 +60,5 @@ Thumbs.db
 *.bak
 *.tmp
 secrets.json
+vendor/
+tools/offline_deps/

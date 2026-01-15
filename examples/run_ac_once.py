@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from eesizer_core.contracts import SimPlan, SimRequest
@@ -8,6 +7,7 @@ from eesizer_core.contracts.enums import SimKind
 from eesizer_core.runtime.context import RunContext
 from eesizer_core.contracts import CircuitSource, SourceKind
 from eesizer_core.sim import DeckBuildOperator, NgspiceRunOperator
+from eesizer_core.sim.ngspice_runner import resolve_ngspice_executable
 from eesizer_core.metrics import ComputeMetricsOperator
 
 
@@ -39,7 +39,7 @@ def main() -> None:
     ctx = RunContext(workspace_root=here / "output")
     runner = NgspiceRunOperator()
 
-    if shutil.which(runner.ngspice_bin) is None:
+    if resolve_ngspice_executable(runner.ngspice_bin) is None:
         print("ngspice not found; skipping run_ac_once")
         return
 

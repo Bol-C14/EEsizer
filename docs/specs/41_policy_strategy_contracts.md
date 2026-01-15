@@ -17,12 +17,17 @@ A policy MAY have internal state, but it MUST expose:
 Observation SHOULD include:
 - `spec: CircuitSpec`
 - `param_space: ParamSpace`
-- `last_patch: Patch | None`
+- `source: CircuitSource`
 - `metrics: MetricsBundle`
-- `raw_data_refs: dict[str, str]` (paths under run dir)
-- `constraints_status: dict[str, Any]`
+- `iteration: int`
+- `history_tail: list[dict[str, Any]]`
+- `notes: dict[str, Any]`
 
 Policies SHOULD NOT require direct file access.
+
+### Reference policies in repo
+- `FixedSequencePolicy`: emits a fixed list of patches then returns `Patch(stop=True, notes="sequence_exhausted")`.
+- `RandomNudgePolicy`: picks a non-frozen param and applies a small multiplicative nudge; stops if none available.
 
 ## 41.2 Strategy contract
 
@@ -39,6 +44,13 @@ Strategies MUST:
 - enforce Patch-only protocol
 - ensure every tool call is wrapped by an Operator
 - append a human-readable decision trace into `RunResult.history`
+
+### Reference strategy in repo
+- `PatchLoopStrategy`:
+  - baseline: signature/IR -> ParamSpace -> grouped SimPlan per SimKind -> metrics -> objective eval
+  - loop: policy -> PatchApplyOperator (with topology guard) -> sim run(s) -> metrics -> evaluate -> update best
+  - stop reasons supported: `reached_target`, `policy_stop`, `no_improvement`, `max_iterations`, `budget_exhausted`, `guard_failed`
+  - history records per-iteration: patch, signatures before/after, metrics, score, sim stage paths, warnings/errors
 
 ### Stop conditions (recommended set)
 

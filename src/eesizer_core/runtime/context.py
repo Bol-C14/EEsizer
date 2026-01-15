@@ -18,10 +18,13 @@ class RunContext:
     env: Dict[str, str] = field(default_factory=dict)
     notes: Dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.workspace_root = Path(self.workspace_root).resolve()
+
     def run_dir(self) -> Path:
         d = self.workspace_root / "runs" / self.run_id
         d.mkdir(parents=True, exist_ok=True)
-        return d
+        return d.resolve()
 
     def manifest(self) -> RunManifest:
         return RunManifest(run_id=self.run_id, workspace=self.run_dir(), seed=self.seed, env=self.env, notes=self.notes)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import subprocess
 import shutil
+import os
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -15,6 +16,39 @@ from .artifacts import RawSimData, SpiceDeck
 from .deck_builder import OUTPUT_PLACEHOLDER
 
 _STAGE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def resolve_ngspice_executable(preferred: Optional[str] = None) -> Optional[str]:
+    """Resolve ngspice executable from env, preferred arg, PATH, or vendor install."""
+    candidates: list[str] = []
+    env_bin = os.getenv("NGSPICE_BIN")
+    if env_bin:
+        candidates.append(env_bin)
+    if preferred:
+        candidates.append(preferred)
+    candidates.append("ngspice")
+
+    seen: set[str] = set()
+    for cand in candidates:
+        if cand in seen:
+            continue
+        seen.add(cand)
+        path_obj = Path(cand)
+        if path_obj.is_file() and os.access(path_obj, os.X_OK):
+            return str(path_obj.resolve())
+        resolved = shutil.which(cand)
+        if resolved:
+            return resolved
+
+    vendor = _repo_root() / "vendor" / "ngspice" / "bin" / "ngspice"
+    if vendor.exists() and os.access(vendor, os.X_OK):
+        return str(vendor.resolve())
+
+    return None
 
 
 def _tail(text: str, limit: int = 2000) -> str:
@@ -140,7 +174,9 @@ class NgspiceRunOperator(Operator):
         deck_path = self._write_deck(deck, stage_dir, resolved_outputs)
         log_path = self._log_path(deck, stage_dir)
 
-        ngspice_path = shutil.which(self.ngspice_bin) or self.ngspice_bin
+        ngspice_path = resolve_ngspice_executable(self.ngspice_bin)
+        if not ngspice_path:
+            raise SimulationError("ngspice executable not found; set NGSPICE_BIN or install system/vendor ngspice")
 
         cmd = [ngspice_path, "-b", "-o", str(log_path), str(deck_path)]
 

@@ -1,0 +1,32 @@
+# Offline Tooling
+
+## ngspice Setup
+
+For offline environments (e.g. HPC nodes without internet), you can pre-download ngspice binaries.
+
+### Workflow
+
+1.  **On a connected machine:**
+    Download the Debian packages for required architectures.
+    ```bash
+    # Download for current architecture
+    ./tools/manage_ngspice.py --download
+
+    # Download for specific architectures (e.g. if preparing for an HPC cluster)
+    ./tools/manage_ngspice.py --download --arch x86_64
+    ./tools/manage_ngspice.py --download --arch arm64
+    ```
+    The files will be saved in `tools/offline_deps/`.
+
+2.  **Transfer:**
+    Copy the entire repository (including `tools/offline_deps/`) to the offline machine.
+
+3.  **On the offline machine (HPC):**
+    Install (extract) the binary for the current architecture. This does **not** require root access.
+    ```bash
+    ./tools/manage_ngspice.py --install
+    ```
+    This extracts ngspice to `vendor/ngspice/`.
+
+4.  **Run:**
+    The `EEsizer` code automatically detects the binary in `vendor/ngspice/bin/ngspice` and uses it instead of the system `ngspice`.

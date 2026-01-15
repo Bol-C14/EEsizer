@@ -1,0 +1,6 @@
+# Pyrefly configuration for the workspace and VS Code extension
+project-includes = ["src", "tests", "tools"]
+project-excludes = ["legacy", "vendor", "build", "dist", ".git", ".github", ".devcontainer", ".venv", ".pytest_cache", ".ruff_cache"]
+search-path = ["src"]
+python-version = "3.10"
+python-platform = "linux"

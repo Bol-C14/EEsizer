@@ -30,8 +30,9 @@ class PatchApplyOperator(Operator):
     name = "patch_apply"
     version = "0.1.0"
 
-    def __init__(self, include_paths: bool = True) -> None:
+    def __init__(self, include_paths: bool = True, max_lines: int = 5000) -> None:
         self._include_paths = include_paths
+        self._max_lines = max_lines
 
     def run(self, inputs: Mapping[str, Any], ctx: Any) -> OperatorResult:
         src = inputs.get("source")
@@ -44,10 +45,14 @@ class PatchApplyOperator(Operator):
         if not isinstance(patch, Patch):
             raise ValidationError("PatchApplyOperator: 'patch' must be Patch")
 
+        include_paths = inputs.get("include_paths", self._include_paths)
+        max_lines = inputs.get("max_lines", self._max_lines)
+        validation_opts = inputs.get("validation_opts", {})
+
         if has_control_block(src.text):
             raise ValidationError("PatchApplyOperator: source netlist must not contain .control/.endc blocks")
 
-        sig = topology_signature(src.text, include_paths=self._include_paths)
+        sig = topology_signature(src.text, include_paths=include_paths, max_lines=max_lines)
         cir = sig.circuit_ir
 
         provenance = Provenance(operator=self.name, version=self.version)
@@ -57,14 +62,21 @@ class PatchApplyOperator(Operator):
         )
         provenance.inputs["patch"] = patch.fingerprint()
 
-        validation = validate_patch(cir, param_space, patch)
+        validation = validate_patch(
+            cir,
+            param_space,
+            patch,
+            wl_ratio_min=validation_opts.get("wl_ratio_min"),
+            max_mul_factor=validation_opts.get("max_mul_factor", 10.0),
+        )
         if not validation.ok:
             raise ValidationError("; ".join(validation.errors))
 
         patched_circuit_ir = apply_patch_with_topology_guard(
             cir,
             patch,
-            include_paths=self._include_paths,
+            include_paths=include_paths,
+            max_lines=max_lines,
         )
         netlist_text = "\n".join(patched_circuit_ir.lines)
         refreshed = topology_signature(netlist_text, include_paths=self._include_paths)

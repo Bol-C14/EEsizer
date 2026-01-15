@@ -248,11 +248,12 @@ def apply_patch_with_topology_guard(
     patch: Patch,
     *,
     include_paths: bool = True,
+    max_lines: int = 5000,
 ) -> CircuitIR:
     """应用 patch 并检查拓扑签名不变，否则抛 ValidationError."""
-    old_sig_result = topology_signature("\n".join(cir.lines), include_paths=include_paths)
+    old_sig_result = topology_signature("\n".join(cir.lines), include_paths=include_paths, max_lines=max_lines)
     new_cir = apply_patch_to_ir(cir, patch)
-    new_sig_result = topology_signature("\n".join(new_cir.lines), include_paths=include_paths)
+    new_sig_result = topology_signature("\n".join(new_cir.lines), include_paths=include_paths, max_lines=max_lines)
     if old_sig_result.signature != new_sig_result.signature:
         diff_parts = []
         old_elems = set(old_sig_result.circuit_ir.elements.keys())

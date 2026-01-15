@@ -8,11 +8,12 @@ from eesizer_core.contracts.enums import SimKind
 from eesizer_core.runtime.context import RunContext
 from eesizer_core.sim import DeckBuildOperator, NgspiceRunOperator
 from eesizer_core.metrics import ComputeMetricsOperator
+from eesizer_core.sim.ngspice_runner import resolve_ngspice_executable
 
 
 @pytest.mark.integration
 def test_ngspice_ac_with_include(tmp_path):
-    if shutil.which("ngspice") is None:
+    if resolve_ngspice_executable() is None:
         pytest.skip("ngspice not installed")
 
     examples_dir = Path(__file__).resolve().parent.parent / "examples"

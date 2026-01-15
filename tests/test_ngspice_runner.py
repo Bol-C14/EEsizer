@@ -200,5 +200,6 @@ def test_ngspice_runner_records_version_best_effort(monkeypatch, tmp_path):
 
     op = NgspiceRunOperator()
     result = op.run({"deck": deck}, ctx)
-    assert result.provenance.notes["ngspice_path"] == "/usr/bin/ngspice"
+    path_recorded = result.provenance.notes["ngspice_path"]
+    assert "ngspice" in path_recorded
     assert result.provenance.notes["ngspice_version"] == "ngspice-foo"
