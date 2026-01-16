@@ -17,6 +17,39 @@ In code, `RunContext.run_dir()` MUST return this root path.
 - Operators MUST NOT write outside the run directory.
 - Every operator that writes files MUST write into a **stage directory** under the run directory.
 
+### Required run artifacts (Step 7)
+
+Each run SHOULD also materialize the following subfolders/files:
+
+```
+runs/<run_id>/
+  run_manifest.json
+  inputs/
+    source.sp
+    spec.json
+    param_space.json
+    cfg.json
+    signature.txt
+  history/
+    iterations.jsonl
+    summary.json
+  provenance/
+    operator_calls.jsonl
+  best/
+    best.sp
+    best_metrics.json
+```
+
+All paths referenced in manifest/history SHOULD be relative to the run directory.
+
+### JSONL schemas (minimal)
+
+`history/iterations.jsonl` lines SHOULD include:
+- `iteration`, `patch`, `metrics`, `score`, `sim_stages`, `guard`, `attempts`
+
+`provenance/operator_calls.jsonl` lines SHOULD include:
+- `operator`, `version`, `start_time`, `end_time`, `inputs`, `outputs`, `command`, `notes`
+
 ## 11.2 Stage directory
 
 A stage is a named subfolder under the run dir:
@@ -35,6 +68,7 @@ Examples:
 
 - Stage names MUST be filesystem-safe.
 - Stage names SHOULD be unique within a run.
+- When a strategy retries within the same iteration, stage names SHOULD include an attempt suffix (e.g., `ac_i003_a01`) to avoid overwriting artifacts.
 
 ## 11.3 Recommended stage contents
 
@@ -49,20 +83,19 @@ For ngspice stages, the following names are recommended:
 - `ngspice_<kind>.log`
 - output files produced by `wrdata` (for example `ac.csv`, `tran.csv`)
 
-## 11.4 Run manifest (planned target)
+## 11.4 Run manifest
 
-The repository already includes a template:
-- `docs/specs/schemas/run_manifest.example.json (mirrored from docs/templates/run_manifest.example.json)`
+A `run_manifest.json` is REQUIRED for end-to-end strategies and should contain:
+- run metadata (time, environment, policy/strategy)
+- inputs (source/spec/param_space hashes + signature)
+- file index for inputs/history/provenance/best
+- result summary (stop reason, best iter/score, sim runs total/ok/failed)
 
-A `run_manifest.json` is RECOMMENDED for end-to-end strategies. It should contain:
-- run metadata (time, git commit, environment)
-- inputs (source/spec hashes)
-- all operator provenance entries
-- final metrics and decision trace
+Template:
+- `docs/specs/schemas/run_manifest.example.json` (mirrored from `docs/templates/run_manifest.example.json`)
 
 ## 11.5 Content addressing
 
 When an artifact payload is large (waveforms), the artifact SHOULD reference paths under the run dir and fingerprint them.
 
 Example: `RawSimData.outputs: dict[str, Path]` must point to files inside the stage dir.
-

@@ -30,6 +30,7 @@ Every artifact MUST satisfy:
 | **Simulation** | simulation plan and evidence | `SimPlan`, `SpiceDeck`, `RawSimData` |
 | **Metrics** | derived values | `MetricValue`, `MetricsBundle` |
 | **Provenance** | audit trail | `Provenance`, `ArtifactFingerprint` |
+| **Guards** | guard checks and reports | `GuardCheck`, `GuardReport` |
 
 ## 20.3 Artifact naming conventions
 
@@ -43,4 +44,3 @@ When evolving artifacts:
 - Add fields as optional with defaults.
 - Avoid changing field meaning.
 - If semantics change, bump spec and code version and add an ADR.
-

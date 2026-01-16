@@ -9,6 +9,13 @@ from eesizer_core.sim import NgspiceRunOperator, SpiceDeck
 from eesizer_core.contracts.errors import SimulationError
 
 
+def _patch_ngspice_resolver(monkeypatch, path: str = "/usr/bin/ngspice"):
+    monkeypatch.setattr(
+        "eesizer_core.sim.ngspice_runner.resolve_ngspice_executable",
+        lambda preferred=None: path,
+    )
+
+
 def test_ngspice_runner_success(monkeypatch, tmp_path):
     workspace = tmp_path / "output"
     ctx = RunContext(workspace_root=workspace)
@@ -29,6 +36,7 @@ def test_ngspice_runner_success(monkeypatch, tmp_path):
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    _patch_ngspice_resolver(monkeypatch)
 
     op = NgspiceRunOperator(ngspice_bin="ngspice")
     result = op.run({"deck": deck}, ctx)
@@ -67,6 +75,7 @@ def test_ngspice_runner_accepts_valid_stage(monkeypatch, tmp_path):
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="ok", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    _patch_ngspice_resolver(monkeypatch)
 
     op = NgspiceRunOperator(ngspice_bin="ngspice")
     result = op.run({"deck": deck, "stage": "ac_integration-01"}, ctx)
@@ -127,6 +136,7 @@ def test_ngspice_runner_missing_expected_output(monkeypatch, tmp_path):
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    _patch_ngspice_resolver(monkeypatch)
 
     op = NgspiceRunOperator()
 
@@ -143,6 +153,7 @@ def test_ngspice_runner_nonzero_returncode(monkeypatch, tmp_path):
         return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="fail", stderr="boom")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    _patch_ngspice_resolver(monkeypatch)
 
     op = NgspiceRunOperator()
     with pytest.raises(SimulationError, match="exited with code 1"):
@@ -196,7 +207,7 @@ def test_ngspice_runner_records_version_best_effort(monkeypatch, tmp_path):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr("eesizer_core.sim.ngspice_runner._probe_ngspice_version", fake_probe)
-    monkeypatch.setattr("eesizer_core.sim.ngspice_runner.shutil.which", lambda _: "/usr/bin/ngspice")
+    _patch_ngspice_resolver(monkeypatch)
 
     op = NgspiceRunOperator()
     result = op.run({"deck": deck}, ctx)

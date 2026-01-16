@@ -65,12 +65,20 @@ Fields:
 - `run_id: str`
 - `workspace: Path`
 - `seed: int | None`
+- `timestamp_start: str | None`
+- `timestamp_end: str | None`
+- `inputs: dict[str, Any]` (hashes + signature)
+- `environment: dict[str, Any]` (python/platform/tool/policy metadata)
+- `files: dict[str, str]` (relative paths under run_dir)
+- `result_summary: dict[str, Any]` (best iter/score, stop reason, sim runs)
+- `result_summary: dict[str, Any]` (best iter/score, stop reason, sim runs total/ok/failed)
 - `tool_versions: dict[str, str]`
 - `env: dict[str, str]`
 - `notes: dict[str, Any]`
 
 Helpers:
-- `save_json(path: Path)` writes a JSON manifest (parents created).
+- `to_dict() -> dict` returns a JSON-ready payload.
+- `save_json(path: Path)` writes the manifest (parents created).
 
 ## 25.5 RunResult
 
@@ -82,3 +90,12 @@ Fields:
 - `history: list[dict[str, Any]]` (per-iteration records)
 - `stop_reason: StopReason | None`
 - `notes: dict[str, Any]`
+
+## 25.6 operator_calls.jsonl
+
+Each line is a JSON object derived from `Provenance`, containing at minimum:
+- `operator`, `version`
+- `start_time`, `end_time`, `duration_s`
+- `inputs`, `outputs` (sha256 maps)
+- `command` (if applicable)
+- `notes` (tool metadata, cwd, return code)

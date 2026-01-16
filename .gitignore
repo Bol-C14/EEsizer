@@ -61,4 +61,5 @@ Thumbs.db
 *.tmp
 secrets.json
 vendor/
+vendor/ngspice/
 tools/offline_deps/

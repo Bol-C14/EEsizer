@@ -79,7 +79,7 @@ class PatchApplyOperator(Operator):
             max_lines=max_lines,
         )
         netlist_text = "\n".join(patched_circuit_ir.lines)
-        refreshed = topology_signature(netlist_text, include_paths=self._include_paths)
+        refreshed = topology_signature(netlist_text, include_paths=include_paths, max_lines=max_lines)
         new_circuit_ir = refreshed.circuit_ir
         new_source = CircuitSource(
             kind=src.kind,

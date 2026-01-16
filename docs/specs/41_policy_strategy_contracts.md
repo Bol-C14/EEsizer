@@ -22,6 +22,7 @@ Observation SHOULD include:
 - `iteration: int`
 - `history_tail: list[dict[str, Any]]`
 - `notes: dict[str, Any]`
+  - Recommended: `notes["last_guard_failures"]` with recent guard failure reasons.
 
 Policies SHOULD NOT require direct file access.
 
@@ -48,9 +49,10 @@ Strategies MUST:
 ### Reference strategy in repo
 - `PatchLoopStrategy`:
   - baseline: signature/IR -> ParamSpace -> grouped SimPlan per SimKind -> metrics -> objective eval
-  - loop: policy -> PatchApplyOperator (with topology guard) -> sim run(s) -> metrics -> evaluate -> update best
+  - loop: policy -> PatchGuardOperator -> PatchApplyOperator -> TopologyGuardOperator -> sim run(s) -> BehaviorGuardOperator -> evaluate -> update best
   - stop reasons supported: `reached_target`, `policy_stop`, `no_improvement`, `max_iterations`, `budget_exhausted`, `guard_failed`
-  - history records per-iteration: patch, signatures before/after, metrics, score, sim stage paths, warnings/errors
+  - history records per-iteration: patch, guard report, attempts, signatures before/after, metrics, score, sim stage paths, warnings/errors
+  - baseline sim errors are captured via guard reports and may stop early with `guard_failed`
 
 ### Stop conditions (recommended set)
 

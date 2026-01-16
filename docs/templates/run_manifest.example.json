@@ -1,26 +1,44 @@
 {
   "run_id": "uuid",
-  "timestamp": "2026-01-11T00:00:00Z",
+  "workspace": "/path/to/runs/uuid",
+  "seed": 123,
+  "timestamp_start": "2026-01-11T00:00:00Z",
+  "timestamp_end": "2026-01-11T00:00:10Z",
   "inputs": {
     "netlist_sha256": "…",
-    "spec_sha256": "…"
+    "spec_sha256": "…",
+    "param_space_sha256": "…",
+    "cfg_sha256": "…",
+    "signature": "sig123"
   },
   "environment": {
-    "python": "3.12",
-    "ngspice": "ngspice-xx",
-    "policy": "LLMPatchPolicy",
-    "model": "gpt-5"
+    "python_version": "3.12",
+    "platform": "linux",
+    "ngspice_version": "ngspice-xx",
+    "policy_name": "LLMPatchPolicy",
+    "policy_version": "0.1.0",
+    "strategy_name": "patch_loop",
+    "strategy_version": "0.1.0"
   },
-  "history": [
-    {
-      "iter": 0,
-      "patch": [],
-      "metrics": {"gain_db": 55.0, "pm_deg": 40.0},
-      "paths": {"deck": "…", "raw": "…"}
-    }
-  ],
-  "result": {
-    "status": "in_progress",
-    "best_iter": 0
-  }
+  "files": {
+    "inputs/source.sp": "inputs/source.sp",
+    "inputs/spec.json": "inputs/spec.json",
+    "inputs/param_space.json": "inputs/param_space.json",
+    "inputs/cfg.json": "inputs/cfg.json",
+    "inputs/signature.txt": "inputs/signature.txt",
+    "history/iterations.jsonl": "history/iterations.jsonl",
+    "history/summary.json": "history/summary.json",
+    "provenance/operator_calls.jsonl": "provenance/operator_calls.jsonl",
+    "best/best.sp": "best/best.sp",
+    "best/best_metrics.json": "best/best_metrics.json"
+  },
+  "result_summary": {
+    "stop_reason": "reached_target",
+    "best_iter": 3,
+    "best_score": 0.0,
+    "sim_runs_total": 4,
+    "guard_fail_counts": {"hard": 0, "soft": 1}
+  },
+  "env": {},
+  "notes": {}
 }

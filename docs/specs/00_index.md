@@ -15,6 +15,7 @@ This index is the navigation hub for the **EEsizer Core** contract.
 - [23_artifact_simulation.md](23_artifact_simulation.md): SimPlan, SpiceDeck, RawSimData.
 - [24_artifact_metrics.md](24_artifact_metrics.md): MetricSpec, MetricsBundle.
 - [25_artifact_provenance.md](25_artifact_provenance.md): Provenance, fingerprints, stable hashing.
+- [26_artifact_guards.md](26_artifact_guards.md): GuardCheck, GuardReport.
 
 ## Execution contracts (Operators)
 
@@ -23,6 +24,7 @@ This index is the navigation hub for the **EEsizer Core** contract.
 - [32_operator_ngspice_run.md](32_operator_ngspice_run.md)
 - [33_operator_metrics_compute.md](33_operator_metrics_compute.md)
 - [34_operator_patch_apply.md](34_operator_patch_apply.md)
+- [35_operator_guards.md](35_operator_guards.md)
 
 ## Decision contracts (Policy + Strategy)
 

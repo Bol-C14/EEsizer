@@ -39,16 +39,36 @@ def resolve_ngspice_executable(preferred: Optional[str] = None) -> Optional[str]
         seen.add(cand)
         path_obj = Path(cand)
         if path_obj.is_file() and os.access(path_obj, os.X_OK):
-            return str(path_obj.resolve())
+            resolved_path = str(path_obj.resolve())
+            if _is_runnable_ngspice(resolved_path):
+                return resolved_path
+            continue
         resolved = shutil.which(cand)
-        if resolved:
+        if resolved and _is_runnable_ngspice(resolved):
             return resolved
 
     vendor = _repo_root() / "vendor" / "ngspice" / "bin" / "ngspice"
     if vendor.exists() and os.access(vendor, os.X_OK):
-        return str(vendor.resolve())
+        resolved_vendor = str(vendor.resolve())
+        if _is_runnable_ngspice(resolved_vendor):
+            return resolved_vendor
 
     return None
+
+
+def _is_runnable_ngspice(path: str, timeout_s: float = 2.0) -> bool:
+    try:
+        proc = subprocess.run(
+            [path, "-v"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_s,
+            cwd=None,
+        )
+    except (OSError, FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
 
 
 def _tail(text: str, limit: int = 2000) -> str:

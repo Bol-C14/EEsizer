@@ -70,18 +70,34 @@ class RunManifest:
     run_id: str
     workspace: Path
     seed: Optional[int] = None
+    timestamp_start: Optional[str] = None
+    timestamp_end: Optional[str] = None
+    inputs: Dict[str, Any] = field(default_factory=dict)
+    environment: Dict[str, Any] = field(default_factory=dict)
+    files: Dict[str, str] = field(default_factory=dict)
+    result_summary: Dict[str, Any] = field(default_factory=dict)
     tool_versions: Dict[str, str] = field(default_factory=dict)
     env: Dict[str, str] = field(default_factory=dict)
     notes: Dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> Dict[str, Any]:
+        return _to_jsonable(
+            {
+                "run_id": self.run_id,
+                "workspace": str(self.workspace),
+                "seed": self.seed,
+                "timestamp_start": self.timestamp_start,
+                "timestamp_end": self.timestamp_end,
+                "inputs": self.inputs,
+                "environment": self.environment,
+                "files": self.files,
+                "result_summary": self.result_summary,
+                "tool_versions": self.tool_versions,
+                "env": self.env,
+                "notes": self.notes,
+            }
+        )
+
     def save_json(self, path: Path) -> None:
-        payload = {
-            "run_id": self.run_id,
-            "workspace": str(self.workspace),
-            "seed": self.seed,
-            "tool_versions": self.tool_versions,
-            "env": self.env,
-            "notes": self.notes,
-        }
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True), encoding="utf-8")

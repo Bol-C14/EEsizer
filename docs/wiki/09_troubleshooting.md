@@ -22,3 +22,8 @@
 ## LLM output not parseable
 - Enforce JSON schema validation
 - Reduce prompt ambiguity; explicitly say “Output JSON only”
+
+## run_manifest.json or history files missing
+- Ensure strategies use `RunContext` so `run_dir` and recorder are available.
+- Check that `inputs/` and `history/` are writable under the run directory.
+- Verify `PYTHONPATH=src` or editable install so imports resolve in tests.
