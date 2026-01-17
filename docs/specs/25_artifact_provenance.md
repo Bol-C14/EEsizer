@@ -88,7 +88,7 @@ Fields:
 - `best_source: CircuitSource | None`
 - `best_metrics: MetricsBundle`
 - `history: list[dict[str, Any]]` (per-iteration records)
-- `stop_reason: StopReason | None`
+- `stop_reason: StopReason | None` (includes `baseline_noopt` and `baseline_legacy` for baseline runs)
 - `notes: dict[str, Any]`
 
 ## 25.6 operator_calls.jsonl

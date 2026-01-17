@@ -231,6 +231,7 @@ def _finalize_run(
     sim_runs: int,
     sim_runs_ok: int,
     sim_runs_failed: int,
+    best_metrics_payload: Mapping[str, Any] | None = None,
 ) -> list[str]:
     errors: list[str] = []
     summary = {
@@ -253,7 +254,8 @@ def _finalize_run(
             except Exception as exc:
                 errors.append(f"best_sp_write_failed: {exc}")
         try:
-            recorder.write_json("best/best_metrics.json", _metrics_to_dict(best_metrics))
+            payload = best_metrics_payload if best_metrics_payload is not None else _metrics_to_dict(best_metrics)
+            recorder.write_json("best/best_metrics.json", payload)
         except Exception as exc:
             errors.append(f"best_metrics_write_failed: {exc}")
         if errors:

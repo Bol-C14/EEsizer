@@ -27,6 +27,8 @@ class PatchOpType(str, Enum):
 
 class StopReason(str, Enum):
     reached_target = "reached_target"
+    baseline_noopt = "baseline_noopt"
+    baseline_legacy = "baseline_legacy"
     max_iterations = "max_iterations"
     no_improvement = "no_improvement"
     guard_failed = "guard_failed"

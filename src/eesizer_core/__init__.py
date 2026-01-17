@@ -31,7 +31,8 @@ from .contracts.operators import Operator, OperatorResult
 from .contracts.policy import Policy, Observation
 from .contracts.strategy import Strategy, StrategyConfig, OptimizationBudget
 from .contracts.provenance import ArtifactFingerprint, Provenance, RunManifest
-from .strategies import PatchLoopStrategy, evaluate_objectives
+from .baselines import LegacyMetricsBaseline
+from .strategies import NoOptBaselineStrategy, PatchLoopStrategy, evaluate_objectives
 from .policies import FixedSequencePolicy, RandomNudgePolicy
 
 __all__ = [
@@ -75,8 +76,11 @@ __all__ = [
     "StrategyConfig",
     "OptimizationBudget",
     # strategies
+    "NoOptBaselineStrategy",
     "PatchLoopStrategy",
     "evaluate_objectives",
+    # baselines
+    "LegacyMetricsBaseline",
     # policies
     "FixedSequencePolicy",
     "RandomNudgePolicy",

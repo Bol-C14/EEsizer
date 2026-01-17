@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..contracts import CircuitSpec, MetricsBundle
+from ..metrics.aliases import canonicalize_metric_name
 
 
 def _safe_abs(val: float | None) -> float:
@@ -38,6 +39,8 @@ def evaluate_objectives(spec: CircuitSpec, metrics: MetricsBundle, eps: float = 
 
     for obj in spec.objectives:
         mv = metrics.get(obj.metric)
+        if mv is None:
+            mv = metrics.get(canonicalize_metric_name(obj.metric))
         val = mv.value if mv is not None else None
         sense = (obj.sense or "ge").lower()
         target = obj.target
