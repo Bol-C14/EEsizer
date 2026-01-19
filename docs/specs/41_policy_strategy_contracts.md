@@ -10,11 +10,11 @@ A policy MAY have internal state, but it MUST expose:
 
 - `name: str`
 - `version: str`
-- `propose(observation: Mapping[str, Any]) -> Patch`
+- `propose(observation: Observation, ctx: Any) -> Patch`
 
 ### Observation structure (recommended)
 
-Observation SHOULD include:
+Observation is a dataclass (`eesizer_core.contracts.policy.Observation`) and SHOULD include:
 - `spec: CircuitSpec`
 - `param_space: ParamSpace`
 - `source: CircuitSource`
@@ -40,7 +40,7 @@ Policies SHOULD NOT require direct file access.
 
 - `name: str`
 - `version: str`
-- `run(source: CircuitSource, spec: CircuitSpec, ctx: RunContext, **cfg) -> RunResult`
+- `run(spec: CircuitSpec, source: CircuitSource, ctx: RunContext, cfg: StrategyConfig) -> RunResult`
 
 ### Strategy responsibilities
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Run-scoped context used by operators/strategies to persist metadata."""
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -15,6 +17,8 @@ from .recorder import RunRecorder
 
 @dataclass
 class RunContext:
+    """Holds run metadata and provides access to run storage helpers."""
+
     workspace_root: Path
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     seed: Optional[int] = None
@@ -25,14 +29,17 @@ class RunContext:
     _recorder: Optional[RunRecorder] = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        # Resolve early so downstream paths are stable.
         self.workspace_root = Path(self.workspace_root).resolve()
 
     def run_dir(self) -> Path:
+        """Return (and create) the run directory for this context."""
         d = self.workspace_root / "runs" / self.run_id
         d.mkdir(parents=True, exist_ok=True)
         return d.resolve()
 
     def manifest(self) -> RunManifest:
+        """Return the lazily-built RunManifest for this run."""
         if self._manifest is None:
             started = datetime.fromtimestamp(self.started_at, tz=timezone.utc).isoformat()
             environment = {
@@ -52,6 +59,7 @@ class RunContext:
         return self._manifest
 
     def recorder(self) -> RunRecorder:
+        """Return a RunRecorder bound to this run's directory."""
         if self._recorder is None:
             self._recorder = RunRecorder(self.run_dir())
         return self._recorder

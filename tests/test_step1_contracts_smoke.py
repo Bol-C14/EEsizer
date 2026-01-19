@@ -1,3 +1,5 @@
+import pytest
+
 from eesizer_core.contracts import (
     CircuitSource, CircuitSpec, Objective,
     ParamDef, ParamSpace,
@@ -7,6 +9,7 @@ from eesizer_core.contracts import (
     SourceKind, SimKind, PatchOpType,
     StrategyConfig, OptimizationBudget,
 )
+from eesizer_core.contracts.errors import ValidationError
 
 
 def test_contracts_import_and_instantiate():
@@ -29,3 +32,8 @@ def test_contracts_import_and_instantiate():
     assert "ac_gain_db" in mb.values
     assert cfg.budget.max_iterations == 3
     assert spec.objectives[0].metric == "ac_gain_db"
+
+
+def test_param_space_rejects_duplicate_ids():
+    with pytest.raises(ValidationError, match="duplicate ParamDef ids"):
+        ParamSpace.build([ParamDef(param_id="m1.w"), ParamDef(param_id="m1.w")])

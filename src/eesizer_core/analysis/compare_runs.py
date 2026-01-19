@@ -211,15 +211,25 @@ def _objective_rows(spec: CircuitSpec, metrics_bundle: MetricsBundle) -> list[di
     return report["per_objective"]
 
 
+def _objective_map(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    mapped: dict[str, Any] = {}
+    for row in rows:
+        metric = row.get("metric")
+        if metric is None:
+            continue
+        mapped[str(metric)] = row.get("passed")
+    return mapped
+
+
+def _objective_table(rows_a: list[dict[str, Any]], rows_b: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    map_a = _objective_map(rows_a)
+    map_b = _objective_map(rows_b)
+    keys = sorted(set(map_a.keys()) | set(map_b.keys()))
+    return [{"metric": key, "a": map_a.get(key), "b": map_b.get(key)} for key in keys]
+
+
 def _objectives_match(rows_a: list[dict[str, Any]], rows_b: list[dict[str, Any]]) -> bool:
-    if len(rows_a) != len(rows_b):
-        return False
-    for a, b in zip(rows_a, rows_b):
-        if a.get("metric") != b.get("metric"):
-            return False
-        if a.get("passed") != b.get("passed"):
-            return False
-    return True
+    return _objective_map(rows_a) == _objective_map(rows_b)
 
 
 def compare_runs(run_dir_a: Path, run_dir_b: Path, out_dir: Path) -> dict[str, Any]:
@@ -237,6 +247,7 @@ def compare_runs(run_dir_a: Path, run_dir_b: Path, out_dir: Path) -> dict[str, A
     objectives_a = _objective_rows(spec, metrics_bundle_a)
     objectives_b = _objective_rows(spec, metrics_bundle_b)
     objectives_match = _objectives_match(objectives_a, objectives_b)
+    objective_table = _objective_table(objectives_a, objectives_b)
 
     metric_rows = _build_metric_rows(metrics_a, metrics_b, tolerances)
     within_fail = any(row.get("within_tol") is False for row in metric_rows.values())
@@ -273,6 +284,7 @@ def compare_runs(run_dir_a: Path, run_dir_b: Path, out_dir: Path) -> dict[str, A
             "run_a": objectives_a,
             "run_b": objectives_b,
             "match": objectives_match,
+            "table": objective_table,
         },
         "metrics": metric_rows,
         "equivalent": (not within_fail) and objectives_match,
@@ -305,8 +317,8 @@ def compare_runs(run_dir_a: Path, run_dir_b: Path, out_dir: Path) -> dict[str, A
     lines.append("")
     lines.append("| Metric | Run A | Run B |")
     lines.append("| --- | --- | --- |")
-    for obj_a, obj_b in zip(objectives_a, objectives_b):
-        lines.append(f"| {obj_a.get('metric')} | {_fmt(obj_a.get('passed'))} | {_fmt(obj_b.get('passed'))} |")
+    for row in objective_table:
+        lines.append(f"| {row.get('metric')} | {_fmt(row.get('a'))} | {_fmt(row.get('b'))} |")
     lines.append("")
     lines.append("## Metrics Diff")
     lines.append("")

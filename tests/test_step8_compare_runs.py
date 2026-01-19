@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from eesizer_core.analysis.compare_runs import compare_runs
+from eesizer_core.analysis.compare_runs import compare_runs, _objective_table
 from eesizer_core.runtime.recorder import RunRecorder
 
 
@@ -58,3 +58,15 @@ def test_compare_runs_outputs(tmp_path):
 
     report = (out_dir / "report.md").read_text(encoding="utf-8")
     assert "Metrics Diff" in report
+
+
+def test_objective_table_handles_mismatch():
+    rows_a = [{"metric": "gain_db", "passed": True}]
+    rows_b = [{"metric": "gain_db", "passed": False}, {"metric": "pm_deg", "passed": True}]
+    table = _objective_table(rows_a, rows_b)
+    assert {row["metric"] for row in table} == {"gain_db", "pm_deg"}
+    lookup = {row["metric"]: row for row in table}
+    assert lookup["gain_db"]["a"] is True
+    assert lookup["gain_db"]["b"] is False
+    assert lookup["pm_deg"]["a"] is None
+    assert lookup["pm_deg"]["b"] is True

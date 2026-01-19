@@ -20,3 +20,13 @@ def test_wl_ratio_check_handles_hierarchical_ids():
     result = validate_patch(cir=cir, param_space=ps, patch=patch, wl_ratio_min=0.5)
     assert not result.ok
     assert any("x1.m1.w" in e for e in result.errors + result.ratio_errors)
+
+
+def test_wl_ratio_check_reports_non_numeric_values():
+    netlist = ".param wval=1u\nM1 d g s b nmos W={wval} L=0.1u\n"
+    cir = topology_signature(netlist).circuit_ir
+    ps = infer_param_space_from_ir(cir)
+
+    result = validate_patch(cir=cir, param_space=ps, patch=Patch(), wl_ratio_min=0.5)
+    assert not result.ok
+    assert any("non-numeric" in e and "m1.w" in e for e in result.errors)

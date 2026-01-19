@@ -45,6 +45,22 @@ def _current_param_value(cir: CircuitIR, param_id: str) -> Optional[str]:
     return raw[start:end]
 
 
+def _candidate_or_current_numeric(
+    cir: CircuitIR,
+    candidate_values: Dict[str, float],
+    param_id: str,
+) -> tuple[Optional[float], Optional[str]]:
+    if param_id in candidate_values:
+        return candidate_values[param_id], None
+    text = _current_param_value(cir, param_id)
+    if text is None:
+        return None, f"param '{param_id}' missing current value"
+    try:
+        return _parse_scalar_numeric(text), None
+    except ValidationError:
+        return None, f"param '{param_id}' has non-numeric current value '{text}'"
+
+
 def validate_patch(
     cir: CircuitIR,
     param_space: ParamSpace,
@@ -130,14 +146,12 @@ def validate_patch(
                 w_id = f"{base}.w"
                 l_id = f"{base}.l"
                 if w_id in cir.param_locs and l_id in cir.param_locs:
-                    w_val = candidate_values.get(w_id)
-                    if w_val is None:
-                        w_text = _current_param_value(cir, w_id)
-                        w_val = _parse_scalar_numeric(w_text) if w_text is not None else None
-                    l_val = candidate_values.get(l_id)
-                    if l_val is None:
-                        l_text = _current_param_value(cir, l_id)
-                        l_val = _parse_scalar_numeric(l_text) if l_text is not None else None
+                    w_val, w_err = _candidate_or_current_numeric(cir, candidate_values, w_id)
+                    if w_err:
+                        errors.append(w_err)
+                    l_val, l_err = _candidate_or_current_numeric(cir, candidate_values, l_id)
+                    if l_err:
+                        errors.append(l_err)
                     if w_val is not None and l_val is not None and w_val < wl_ratio_min * l_val:
                         ratio_errors.append(f"{w_id} < {wl_ratio_min}*{l_id}")
 

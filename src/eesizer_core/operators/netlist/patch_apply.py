@@ -54,6 +54,7 @@ class PatchApplyOperator(Operator):
 
         sig = topology_signature(src.text, include_paths=include_paths, max_lines=max_lines)
         cir = sig.circuit_ir
+        signature_before = sig.signature
 
         provenance = Provenance(operator=self.name, version=self.version)
         provenance.inputs["source"] = src.fingerprint()
@@ -81,6 +82,7 @@ class PatchApplyOperator(Operator):
         netlist_text = "\n".join(patched_circuit_ir.lines)
         refreshed = topology_signature(netlist_text, include_paths=include_paths, max_lines=max_lines)
         new_circuit_ir = refreshed.circuit_ir
+        signature_after = refreshed.signature
         new_source = CircuitSource(
             kind=src.kind,
             text=netlist_text,
@@ -95,6 +97,12 @@ class PatchApplyOperator(Operator):
             sha256=stable_hash_str(netlist_text)
         )
         provenance.outputs["source"] = new_source.fingerprint()
+        provenance.outputs["signature_before"] = ArtifactFingerprint(
+            sha256=stable_hash_str(signature_before)
+        )
+        provenance.outputs["signature_after"] = ArtifactFingerprint(
+            sha256=stable_hash_str(signature_after)
+        )
         provenance.finish()
 
         return OperatorResult(

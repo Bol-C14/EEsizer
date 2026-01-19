@@ -21,6 +21,8 @@ Current state:
 
 ```
 src/eesizer_core/          # reusable core: contracts, domain.spice, operators.netlist, sim, metrics, runtime
+src/eesizer_core/strategies/   # orchestration (patch loop, baselines)
+src/eesizer_core/policies/     # decision-making (heuristics, LLM/RL/BO stubs)
 tests/                     # refactor-track tests (pytest)
 examples/                  # minimal reproducible demos (ngspice + metrics)
 docs/wiki/                 # this wiki
@@ -31,8 +33,6 @@ output/                    # local run artifacts (gitignored)
 Planned (not yet implemented):
 ```
 src/eesizer_cli/           # thin CLI wrapper over eesizer_core (future)
-src/eesizer_core/strategies/   # orchestration (future)
-src/eesizer_core/policies/     # decision-making (future)
 ```
 
 ## Module ownership
@@ -42,8 +42,8 @@ src/eesizer_core/policies/     # decision-making (future)
 - `eesizer_core/sim/*`: deck builder, netlist bundle, ngspice runner (file/command execution).
 - `eesizer_core/metrics/*`: MetricImplSpec, registry, compute functions (AC/DC/TRAN), compute operator.
 - `eesizer_core/runtime/*`: RunContext (run_dir/workspace utilities).
-- (planned) `eesizer_core/strategies/*`: workflow orchestration (loop, stopping rules, logging).
-- (planned) `eesizer_core/policies/*`: decision-making (LLM, RL, BO); **no file I/O**, **no netlist editing**.
+- `eesizer_core/strategies/*`: workflow orchestration (loop, stopping rules, logging).
+- `eesizer_core/policies/*`: decision-making (LLM, RL, BO); **no file I/O**, **no netlist editing**.
 - (planned) `eesizer_cli/`: thin CLI that wires strategies/policies/operators.
 
 ## Naming conventions

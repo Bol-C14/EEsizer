@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Greedy coordinate-descent policy with adaptive per-parameter step sizes."""
+
 import random
 import re
 from dataclasses import dataclass, field
@@ -11,11 +13,18 @@ from ..contracts.policy import Observation, Policy
 
 
 _PARAM_IN_REASON = re.compile(r"param '([^']+)'")
+# Extracts a param id from guard failure strings like "param 'r1'".
 
 
 @dataclass
 class GreedyCoordinatePolicy(Policy):
-    """Coordinate descent / hill-climb policy with adaptive steps and guard feedback."""
+    """Coordinate descent / hill-climb policy with adaptive steps and guard feedback.
+
+    The policy expects `Observation.notes` to include:
+      - current_score: numeric scalar for the current point
+      - param_values: mapping of param_id -> current numeric value
+      - last_guard_report or last_guard_failures (optional) for blacklist feedback
+    """
 
     name: str = "greedy_coordinate"
     version: str = "0.1.0"
@@ -35,6 +44,7 @@ class GreedyCoordinatePolicy(Policy):
     score_goal: str = "min"
     score_eps: float = 1e-12
 
+    # Internal adaptive state (per-run, not serialized).
     _param_ids: list[str] = field(default_factory=list, init=False, repr=False)
     _param_index: int = field(default=0, init=False, repr=False)
     _steps: dict[str, float] = field(default_factory=dict, init=False, repr=False)
@@ -52,6 +62,7 @@ class GreedyCoordinatePolicy(Policy):
     _rng: random.Random = field(default_factory=random.Random, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        """Validate configuration and normalize suffix lists."""
         if self.selector not in {"round_robin", "random"}:
             raise ValueError("selector must be 'round_robin' or 'random'")
         if self.seed is not None:
@@ -60,6 +71,7 @@ class GreedyCoordinatePolicy(Policy):
         self.prefer_add_suffixes = tuple(s.lower() for s in self.prefer_add_suffixes)
 
     def propose(self, obs: Observation, ctx: Any) -> Patch:  # type: ignore[override]
+        """Propose a patch based on last outcome and current parameter values."""
         self._refresh_params(obs.param_space)
 
         param_values = obs.notes.get("param_values")
@@ -71,6 +83,7 @@ class GreedyCoordinatePolicy(Policy):
         if not isinstance(current_score, (int, float)):
             return Patch(stop=True, notes="missing_current_score")
 
+        # Update internal step sizes and direction based on prior iteration feedback.
         self._apply_feedback(current_score, obs.notes)
 
         if (
@@ -88,6 +101,7 @@ class GreedyCoordinatePolicy(Policy):
                 break
             patch = self._make_patch(param_id, obs.param_space, param_values)
             if patch is not None:
+                # Record that we expect feedback for this proposal next iteration.
                 self._pending = True
                 self._last_score = float(current_score)
                 self._last_param = param_id
@@ -99,6 +113,7 @@ class GreedyCoordinatePolicy(Policy):
         return Patch(stop=True, notes="no_tunable_params")
 
     def _refresh_params(self, param_space: ParamSpace) -> None:
+        """Sync internal parameter lists with the current ParamSpace."""
         param_ids = [p.param_id for p in param_space.params if not p.frozen]
         if param_ids != self._param_ids:
             self._param_ids = param_ids
@@ -111,6 +126,7 @@ class GreedyCoordinatePolicy(Policy):
                 self._param_index = 0
 
     def _apply_feedback(self, current_score: float, notes: Mapping[str, Any]) -> None:
+        """Update step sizes and direction based on the last attempted patch."""
         if not self._pending:
             return
         guard_failed, guard_params = self._guard_feedback(notes)
@@ -131,6 +147,7 @@ class GreedyCoordinatePolicy(Policy):
         self._pending = False
 
     def _guard_feedback(self, notes: Mapping[str, Any]) -> tuple[bool, set[str]]:
+        """Parse guard notes to detect failures and parameter-specific issues."""
         guard_report = notes.get("last_guard_report")
         guard_failed = False
         reasons: list[str] = []
@@ -162,6 +179,7 @@ class GreedyCoordinatePolicy(Policy):
         return guard_failed, params
 
     def _register_success(self) -> None:
+        """Adjust step size on success and optionally move to the next parameter."""
         if self._last_param is None:
             return
         step = self._steps.get(self._last_param, self.init_step)
@@ -174,6 +192,7 @@ class GreedyCoordinatePolicy(Policy):
             self._advance_param(None)
 
     def _register_failure(self) -> None:
+        """Shrink step size and change direction/phase after a failed trial."""
         if self._last_param is None:
             return
         step = self._steps.get(self._last_param, self.init_step)
@@ -200,6 +219,7 @@ class GreedyCoordinatePolicy(Policy):
             self._advance_param(None)
 
     def _advance_param(self, param_values: Mapping[str, Any] | None) -> None:
+        """Select a new parameter and reset per-parameter trial state."""
         values = param_values if param_values is not None else self._last_param_values
         self._current_param = self._select_param(values)
         self._phase = "try_plus"
@@ -208,6 +228,7 @@ class GreedyCoordinatePolicy(Policy):
         self._success_streak = 0
 
     def _select_param(self, param_values: Mapping[str, Any]) -> Optional[str]:
+        """Return the next tunable parameter id based on the selector policy."""
         if not self._param_ids:
             return None
         if self.selector == "random":
@@ -230,14 +251,17 @@ class GreedyCoordinatePolicy(Policy):
 
     @staticmethod
     def _is_param_usable(param_id: str, param_values: Mapping[str, Any]) -> bool:
+        """Check whether a parameter has a usable current value."""
         return param_id in param_values
 
     def _score_improved(self, new_score: float, old_score: float) -> bool:
+        """Return True if the score is better than before (respecting goal/eps)."""
         if self.score_goal == "max":
             return new_score > old_score + self.score_eps
         return new_score < old_score - self.score_eps
 
     def _op_type_for_param(self, param_id: str) -> PatchOpType:
+        """Choose add vs mul based on parameter name suffix heuristics."""
         pid = param_id.lower()
         if any(pid.endswith(sfx) for sfx in self.prefer_add_suffixes):
             return PatchOpType.add
@@ -251,6 +275,7 @@ class GreedyCoordinatePolicy(Policy):
         param_space: ParamSpace,
         param_values: Mapping[str, Any],
     ) -> Optional[Patch]:
+        """Build a Patch for the given parameter, respecting bounds and step size."""
         if param_id in self._blacklist:
             return None
         current_val = param_values.get(param_id)
@@ -285,6 +310,7 @@ class GreedyCoordinatePolicy(Policy):
             patch_op = PatchOpType.set
             patch_value = float(upper)
 
+        # Skip no-op proposals (within numeric tolerance).
         if abs(candidate - float(current_val)) <= self.score_eps:
             return None
 

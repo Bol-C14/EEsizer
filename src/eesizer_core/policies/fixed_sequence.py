@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Policy that returns a predefined sequence of patches."""
+
 from dataclasses import dataclass, field
 
 from ..contracts import Patch
@@ -16,6 +18,7 @@ class FixedSequencePolicy(Policy):
     _idx: int = 0
 
     def propose(self, obs: Observation, ctx) -> Patch:  # type: ignore[override]
+        """Return the next patch in sequence or a stop signal when exhausted."""
         if self._idx < len(self.patches):
             patch = self.patches[self._idx]
             self._idx += 1

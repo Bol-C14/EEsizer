@@ -5,6 +5,7 @@ from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 from .enums import SourceKind, SimKind, PatchOpType, StopReason
+from .errors import ValidationError
 from .provenance import ArtifactFingerprint, stable_hash_json, stable_hash_str
 
 
@@ -104,7 +105,16 @@ class ParamSpace:
 
     @staticmethod
     def build(params: Sequence[ParamDef]) -> "ParamSpace":
-        idx = {p.param_id: i for i, p in enumerate(params)}
+        idx: Dict[str, int] = {}
+        duplicates: list[str] = []
+        for i, p in enumerate(params):
+            if p.param_id in idx:
+                duplicates.append(p.param_id)
+                continue
+            idx[p.param_id] = i
+        if duplicates:
+            dup_list = ", ".join(sorted(set(duplicates)))
+            raise ValidationError(f"duplicate ParamDef ids: {dup_list}")
         return ParamSpace(params=tuple(params), _index=MappingProxyType(idx))
 
     def contains(self, param_id: str) -> bool:

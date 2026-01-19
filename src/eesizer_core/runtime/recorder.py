@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Record run inputs/outputs to disk in JSON or JSONL form."""
+
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -11,9 +13,11 @@ class RunRecorder:
     """Lightweight writer for run artifacts and JSONL logs."""
 
     def __init__(self, run_dir: Path) -> None:
+        """Bind the recorder to a run directory on disk."""
         self.run_dir = Path(run_dir).resolve()
 
     def relpath(self, path: str | Path) -> str:
+        """Return a run_dir-relative path string when possible."""
         p = Path(path)
         try:
             rel = p.resolve().relative_to(self.run_dir)
@@ -22,6 +26,7 @@ class RunRecorder:
             return str(path)
 
     def _jsonable(self, value: Any) -> Any:
+        """Convert a value into a JSON-serializable structure."""
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
         if isinstance(value, Path):
@@ -37,6 +42,7 @@ class RunRecorder:
         return str(value)
 
     def _maybe_relpath_str(self, value: str) -> str:
+        """Normalize absolute path strings to run_dir-relative where possible."""
         if os.path.isabs(value):
             try:
                 return self.relpath(value)
@@ -45,6 +51,7 @@ class RunRecorder:
         return value
 
     def _normalize_payload(self, payload: Any) -> Any:
+        """Normalize nested payloads, including path-like strings."""
         value = self._jsonable(payload)
         if isinstance(value, str):
             return self._maybe_relpath_str(value)
@@ -55,21 +62,25 @@ class RunRecorder:
         return value
 
     def _write_text(self, rel_path: str, text: str) -> Path:
+        """Write UTF-8 text to a path under run_dir."""
         path = self.run_dir / rel_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         return path
 
     def write_input(self, name: str, payload: Any) -> Path:
+        """Write inputs under inputs/, picking text or JSON based on payload type."""
         rel_path = f"inputs/{name}"
         if isinstance(payload, str):
             return self._write_text(rel_path, payload)
         return self.write_json(rel_path, payload)
 
     def write_text(self, rel_path: str, text: str) -> Path:
+        """Write raw text to a run-relative path."""
         return self._write_text(rel_path, text)
 
     def write_json(self, rel_path: str, payload: Any) -> Path:
+        """Serialize payload to JSON at a run-relative path."""
         path = self.run_dir / rel_path
         path.parent.mkdir(parents=True, exist_ok=True)
         normalized = self._normalize_payload(payload)
@@ -77,6 +88,7 @@ class RunRecorder:
         return path
 
     def append_jsonl(self, rel_path: str, payload: Any) -> Path:
+        """Append one JSON record (per line) to a run-relative path."""
         path = self.run_dir / rel_path
         path.parent.mkdir(parents=True, exist_ok=True)
         normalized = self._normalize_payload(payload)

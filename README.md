@@ -22,7 +22,7 @@ This repository has been refactored from a legacy notebook-based codebase into a
 * ✅ **Step 2:** SPICE netlist canonicalization + lightweight IR + topology signature guard
 * ✅ **Step 3:** Patch substrate (parameter-only editing with topology/schema guards)
 * ✅ **Step 4:** Simulation stack (DeckBuildOperator + NgspiceRunOperator + ComputeMetricsOperator + metrics registry)
-* 🚧 **Next (Step 5):** Strategy/Policy loops (LLM/RL/BO) built on the operator stack
+* 🚧 **Step 5 (in progress):** Strategy/Policy loops (PatchLoopStrategy + heuristic policies in repo)
 
 > The `legacy/` directory contains old code and references.
 > New development happens in `src/eesizer_core/`.
