@@ -22,7 +22,7 @@ def test_compare_new_vs_legacy_metrics_integration(tmp_path):
     if not ensure_legacy_importable():
         pytest.skip("legacy_eesizer not importable; skip legacy comparison integration test")
 
-    netlist = "V1 in 0 AC 2\nR1 in out 1k\nC1 out 0 1u\nRleak out 0 1G\n.end\n"
+    netlist = "* title\nV1 in 0 AC 2\nR1 in out 1k\nC1 out 0 1u\nRleak out 0 1G\n.end\n"
     source = CircuitSource(
         kind=SourceKind.spice_netlist,
         text=netlist,

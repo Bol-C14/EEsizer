@@ -33,6 +33,12 @@ def _normalize_output_nodes(nodes: Iterable[str] | None) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _scale_label(base: str, idx: int) -> str:
+    if idx == 0:
+        return base
+    return f"{base}_{idx}"
+
+
 def _inject_control_block(netlist_text: str, control_lines: Sequence[str]) -> str:
     lines = netlist_text.splitlines()
     lower_lines = [ln.strip().lower() for ln in lines]
@@ -104,17 +110,18 @@ class DeckBuildOperator(Operator):
             ".control",
             "set filetype=ascii",
             f"ac dec {p_per_dec_int} {_format_value(start)} {_format_value(stop)}",
-            f"wrdata {OUTPUT_PLACEHOLDER}/ac.csv frequency {' '.join(self._ac_columns(output_nodes))}",
+            f"wrdata {OUTPUT_PLACEHOLDER}/ac.csv {' '.join(f'v({n})' for n in output_nodes)}",
             "quit",
             ".endc",
         ]
-        meta = {"ac_csv": tuple(["frequency"] + self._ac_columns(output_nodes))}
+        meta = {"ac_csv": tuple(self._ac_columns(output_nodes))}
         return control_lines, output_nodes, {"ac_csv": "ac.csv"}, meta
 
     @staticmethod
     def _ac_columns(nodes: tuple[str, ...]) -> list[str]:
         cols: list[str] = []
-        for node in nodes:
+        for idx, node in enumerate(nodes):
+            cols.append(_scale_label("frequency", idx))
             cols.append(f"real(v({node}))")
             cols.append(f"imag(v({node}))")
         return cols
@@ -136,11 +143,11 @@ class DeckBuildOperator(Operator):
             ".control",
             "set filetype=ascii",
             f"dc {source} {_format_value(start)} {_format_value(stop)} {_format_value(step)}",
-            f"wrdata {OUTPUT_PLACEHOLDER}/dc.csv v({sweep_node}) {' '.join(f'v({n})' for n in output_nodes)}",
+            f"wrdata {OUTPUT_PLACEHOLDER}/dc.csv {' '.join(f'v({n})' for n in output_nodes)}",
             "quit",
             ".endc",
         ]
-        meta = {"dc_csv": tuple([f"v({sweep_node})"] + [f"v({n})" for n in output_nodes])}
+        meta = {"dc_csv": tuple(self._dc_columns(sweep_node, output_nodes))}
         return control_lines, output_nodes, {"dc_csv": "dc.csv"}, meta
 
     def _build_tran_control(
@@ -154,12 +161,29 @@ class DeckBuildOperator(Operator):
             ".control",
             "set filetype=ascii",
             f"tran {_format_value(step)} {_format_value(stop)}",
-            f"wrdata {OUTPUT_PLACEHOLDER}/tran.csv time {' '.join(f'v({n})' for n in output_nodes)}",
+            f"wrdata {OUTPUT_PLACEHOLDER}/tran.csv {' '.join(f'v({n})' for n in output_nodes)}",
             "quit",
             ".endc",
         ]
-        meta = {"tran_csv": tuple(["time"] + [f"v({n})" for n in output_nodes])}
+        meta = {"tran_csv": tuple(self._tran_columns(output_nodes))}
         return control_lines, output_nodes, {"tran_csv": "tran.csv"}, meta
+
+    @staticmethod
+    def _dc_columns(sweep_node: str, nodes: tuple[str, ...]) -> list[str]:
+        cols: list[str] = []
+        base = f"v({sweep_node})"
+        for idx, node in enumerate(nodes):
+            cols.append(_scale_label(base, idx))
+            cols.append(f"v({node})")
+        return cols
+
+    @staticmethod
+    def _tran_columns(nodes: tuple[str, ...]) -> list[str]:
+        cols: list[str] = []
+        for idx, node in enumerate(nodes):
+            cols.append(_scale_label("time", idx))
+            cols.append(f"v({node})")
+        return cols
 
     @staticmethod
     def _select_sim(sim_plan: SimPlan, sim_kind: SimKind | None) -> tuple[SimRequest, SimKind]:

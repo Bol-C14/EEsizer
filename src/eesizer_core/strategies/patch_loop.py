@@ -34,6 +34,7 @@ from ..operators.guards import (
 from ..sim import DeckBuildOperator, NgspiceRunOperator
 from ..strategies.objective_eval import evaluate_objectives
 from ..domain.spice.params import ParamInferenceRules, infer_param_space_from_ir
+from ..domain.spice.patching import extract_param_values
 from ..runtime.recorder import RunRecorder
 
 
@@ -691,6 +692,14 @@ class PatchLoopStrategy(Strategy):
             warnings_i: list[str] = []
             sim_runs_delta = 0
             last_guard_failures: list[str] = []
+            last_guard_report: GuardReport | None = None
+
+            cur_eval = evaluate_objectives(spec, cur_metrics)
+            current_score = cur_eval["score"]
+            param_values, param_value_errors = extract_param_values(
+                circuit_ir,
+                param_ids=[p.param_id for p in param_space.params],
+            )
 
             validation_opts = {
                 "wl_ratio_min": guard_cfg.get("wl_ratio_min"),
@@ -707,9 +716,18 @@ class PatchLoopStrategy(Strategy):
                 if max_sim_runs is not None and sim_runs >= max_sim_runs:
                     stop_reason = StopReason.budget_exhausted
                     break
-                obs_notes: dict[str, Any] = {"last_score": best_score}
+                obs_notes: dict[str, Any] = {
+                    "last_score": best_score,
+                    "best_score": best_score,
+                    "current_score": current_score,
+                    "param_values": dict(param_values),
+                }
+                if param_value_errors:
+                    obs_notes["param_value_errors"] = list(param_value_errors)
                 if last_guard_failures:
                     obs_notes["last_guard_failures"] = list(last_guard_failures)
+                if last_guard_report is not None:
+                    obs_notes["last_guard_report"] = _guard_report_to_dict(last_guard_report)
 
                 obs = _make_observation(
                     spec=spec,
@@ -751,6 +769,7 @@ class PatchLoopStrategy(Strategy):
                     _record_operator_result(recorder, guard_chain_res)
                     guard_report = guard_chain_res.outputs["report"]
                     last_guard_failures = _guard_failures(guard_report)
+                    last_guard_report = guard_report
                     attempts.append(_attempt_record(attempt, patch, guard_report))
                     if attempt >= self.max_patch_retries:
                         stop_reason = StopReason.guard_failed
@@ -780,6 +799,7 @@ class PatchLoopStrategy(Strategy):
                     _record_operator_result(recorder, guard_chain_res)
                     guard_report = guard_chain_res.outputs["report"]
                     last_guard_failures = _guard_failures(guard_report)
+                    last_guard_report = guard_report
                     attempts.append(_attempt_record(attempt, patch, guard_report))
                     if attempt >= self.max_patch_retries:
                         stop_reason = StopReason.guard_failed
@@ -797,6 +817,7 @@ class PatchLoopStrategy(Strategy):
                     _record_operator_result(recorder, guard_chain_res)
                     guard_report = guard_chain_res.outputs["report"]
                     last_guard_failures = _guard_failures(guard_report)
+                    last_guard_report = guard_report
                     attempts.append(_attempt_record(attempt, patch, guard_report))
                     if attempt >= self.max_patch_retries:
                         stop_reason = StopReason.guard_failed
@@ -839,6 +860,7 @@ class PatchLoopStrategy(Strategy):
                     _record_operator_result(recorder, guard_chain_res)
                     guard_report = guard_chain_res.outputs["report"]
                     last_guard_failures = _guard_failures(guard_report)
+                    last_guard_report = guard_report
                     attempts.append(_attempt_record(attempt, patch, guard_report))
                     if attempt >= self.max_patch_retries:
                         stop_reason = StopReason.guard_failed
@@ -859,12 +881,14 @@ class PatchLoopStrategy(Strategy):
 
                 if not guard_report.ok:
                     last_guard_failures = _guard_failures(guard_report)
+                    last_guard_report = guard_report
                     if attempt >= self.max_patch_retries:
                         stop_reason = StopReason.guard_failed
                     continue
 
                 errors = _guard_failures(guard_report)
                 success = True
+                last_guard_report = guard_report
                 break
 
             if stop_reason in {StopReason.policy_stop, StopReason.guard_failed, StopReason.budget_exhausted}:

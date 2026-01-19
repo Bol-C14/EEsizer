@@ -41,7 +41,7 @@ from .contracts.strategy import Strategy, StrategyConfig, OptimizationBudget
 from .contracts.provenance import ArtifactFingerprint, Provenance, RunManifest
 from .baselines import LegacyMetricsBaseline
 from .strategies import NoOptBaselineStrategy, PatchLoopStrategy, evaluate_objectives
-from .policies import FixedSequencePolicy, RandomNudgePolicy
+from .policies import FixedSequencePolicy, RandomNudgePolicy, GreedyCoordinatePolicy
 from .sim import (
     DeckBuildOperator,
     NgspiceRunOperator,
@@ -110,6 +110,7 @@ __all__ = [
     # policies
     "FixedSequencePolicy",
     "RandomNudgePolicy",
+    "GreedyCoordinatePolicy",
     # provenance
     "ArtifactFingerprint",
     "Provenance",

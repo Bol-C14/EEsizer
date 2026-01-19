@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 import re
 
 from ...contracts.artifacts import CircuitIR, ParamSpace, Patch, PatchOp, Scalar, TokenLoc
@@ -162,6 +162,28 @@ def _parse_scalar_numeric(value: Scalar) -> float:
     if suffix_norm in _UNIT_MULTIPLIERS:
         return base * _UNIT_MULTIPLIERS[suffix_norm]
     raise ValidationError(f"unsupported unit suffix '{suffix}' in value '{value}'")
+
+
+def extract_param_values(
+    cir: CircuitIR,
+    param_ids: Optional[Iterable[str]] = None,
+) -> tuple[dict[str, float], list[str]]:
+    """Extract numeric param values from a CircuitIR."""
+    values: dict[str, float] = {}
+    errors: list[str] = []
+    ids = list(param_ids) if param_ids is not None else list(cir.param_locs.keys())
+    for param_id in ids:
+        pid = param_id.lower()
+        if pid not in cir.param_locs:
+            continue
+        raw = _current_param_value(cir, pid)
+        if raw is None:
+            continue
+        try:
+            values[pid] = _parse_scalar_numeric(raw)
+        except ValidationError as exc:
+            errors.append(f"param '{param_id}' has non-numeric value '{raw}': {exc}")
+    return values, errors
 
 
 def _format_scalar(value: Scalar) -> str:

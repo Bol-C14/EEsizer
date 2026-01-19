@@ -1,0 +1,12 @@
+{
+  "objectives": [
+    {
+      "metric": "ac_mag_db_at_1k",
+      "target": -20.0,
+      "sense": "ge"
+    }
+  ],
+  "constraints": [],
+  "observables": [],
+  "notes": {}
+}

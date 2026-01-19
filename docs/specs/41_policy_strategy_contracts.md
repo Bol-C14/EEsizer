@@ -23,12 +23,16 @@ Observation SHOULD include:
 - `history_tail: list[dict[str, Any]]`
 - `notes: dict[str, Any]`
   - Recommended: `notes["last_guard_failures"]` with recent guard failure reasons.
+  - Recommended: `notes["current_score"]` and `notes["best_score"]` as scalar objective scores.
+  - Recommended: `notes["param_values"]` mapping param_id -> numeric value for current state.
+  - Recommended: `notes["last_guard_report"]` with structured guard feedback from the last attempt.
 
 Policies SHOULD NOT require direct file access.
 
 ### Reference policies in repo
 - `FixedSequencePolicy`: emits a fixed list of patches then returns `Patch(stop=True, notes="sequence_exhausted")`.
 - `RandomNudgePolicy`: picks a non-frozen param and applies a small multiplicative nudge; stops if none available.
+- `GreedyCoordinatePolicy`: coordinate descent / hill-climb with adaptive step size and guard-aware retries.
 
 ## 41.2 Strategy contract
 

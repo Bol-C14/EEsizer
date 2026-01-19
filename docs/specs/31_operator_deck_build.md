@@ -36,9 +36,9 @@ Optional inputs:
 
 ## Wrdata outputs (standardized)
 
-- **AC**: writes `ac.csv` with columns `frequency`, `real(v(<node>))`, `imag(v(<node>))` for each requested output node (Hz, volts).
-- **DC**: writes `dc.csv` with columns `v(<sweep_node>)` followed by `v(<node>)` for each output node (volts).
-- **TRAN**: writes `tran.csv` with columns `time` (seconds) followed by `v(<node>)` for each output node (volts).
+- **AC**: writes `ac.csv` with columns `frequency`, `real(v(<node>))`, `imag(v(<node>))` for each requested output node. For multiple nodes, the scale column repeats with suffixes (e.g., `frequency`, `frequency_1`, ...).
+- **DC**: writes `dc.csv` with columns `v(<sweep_node>)`, `v(<node>)` for each output node; scale repeats per node as `v(<sweep_node>)`, `v(<sweep_node>)_1`, ...
+- **TRAN**: writes `tran.csv` with columns `time`, `v(<node>)` for each output node; scale repeats per node as `time`, `time_1`, ...
 
 ## Validation rules
 

@@ -18,7 +18,7 @@ Do not merge these into a single mega-file.
 
 ### Deck/Runner rules (Step4)
 - `SpiceDeck.expected_outputs` names are always written to the run directory (`<workspace_root>/runs/<run_id>/<stage>/...`).
-- `SpiceDeck.expected_outputs_meta` records the wrdata column order (e.g., `("frequency", "real(v(out))", "imag(v(out))")`).
+- `SpiceDeck.expected_outputs_meta` records the wrdata column order (e.g., `("frequency", "real(v(out))", "imag(v(out))")`). For multiple outputs, the scale column is repeated with suffixes (e.g., `frequency`, `frequency_1`, ...).
 - `SpiceDeck.workdir` is mandatory when the source netlist uses relative `.include`/`.lib`; `NgspiceRunOperator` runs with `cwd=workdir` and rewrites wrdata targets to absolute paths under the run directory.
 
 ## 3) Metric registry
@@ -58,7 +58,8 @@ Metric operator must record:
 - Header handling:
   - If the first non-empty line starts with `*`, treat it as header (sans `*`).
   - If the first line is non-numeric, treat it as header.
-  - If no header, use the column order from `SpiceDeck.expected_outputs_meta` (e.g., `frequency vdb(out) vp(out)`).
+- If no header, use the column order from `SpiceDeck.expected_outputs_meta`.
+- If `expected_columns` is provided, it overrides header names while preserving column order.
 - `load_wrdata_table` (in `eesizer_core/io/ngspice_wrdata.py`) is the single loader used by all metrics; do not reimplement parsing.
 - Metrics must raise clear errors when required columns are missing (no silent fallbacks).
 

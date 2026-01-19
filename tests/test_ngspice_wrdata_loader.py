@@ -19,3 +19,15 @@ def test_wrdata_loader_headerless(tmp_path):
     cols, df = load_wrdata_table(path, expected_columns=expected)
     assert cols[:2] == expected
     assert list(df.columns)[:2] == expected
+
+
+def test_wrdata_loader_overrides_header_with_expected(tmp_path):
+    path = tmp_path / "ac.dat"
+    path.write_text(
+        "* freq junk\n1 1 0\n10 0.1 0\n",
+        encoding="utf-8",
+    )
+    expected = ["frequency", "real(v(out))", "imag(v(out))"]
+    cols, df = load_wrdata_table(path, expected_columns=expected)
+    assert cols == expected
+    assert list(df.columns) == expected

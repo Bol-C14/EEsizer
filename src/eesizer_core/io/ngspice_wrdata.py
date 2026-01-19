@@ -35,7 +35,8 @@ def load_wrdata_table(
     - Strip empty lines.
     - If first non-empty line starts with comment_prefix, use it as header (sans prefix).
     - Else, if the first line is non-numeric, treat as header.
-    - Else, assume no header and use expected_columns if provided (must match column count) else auto c0..cN.
+    - Else, assume no header and use expected_columns if provided (must fit column count) else auto c0..cN.
+    - If expected_columns is provided, it overrides header names while preserving column order.
     - Comment-prefixed lines in the data section are skipped.
     Raises MetricError on missing file, empty content, or column count mismatch.
     """
@@ -79,20 +80,14 @@ def load_wrdata_table(
         raise MetricError(f"No data rows found in wrdata file: {path}")
 
     sample_cols = len(data_lines[0].split())
-    if header_tokens is None:
-        if expected_columns is not None:
-            if len(expected_columns) > sample_cols:
-                raise MetricError(
-                    f"Data columns ({sample_cols}) fewer than expected ({len(expected_columns)}) in {path}"
-                )
-            header_tokens = list(expected_columns) + [f"c{i}" for i in range(len(expected_columns), sample_cols)]
-        else:
-            header_tokens = [f"c{i}" for i in range(sample_cols)]
-    else:
-        if expected_columns is not None and len(expected_columns) != len(header_tokens):
+    if expected_columns is not None:
+        if len(expected_columns) > sample_cols:
             raise MetricError(
-                f"Header column count ({len(header_tokens)}) does not match expected ({len(expected_columns)}) in {path}"
+                f"Data columns ({sample_cols}) fewer than expected ({len(expected_columns)}) in {path}"
             )
+        header_tokens = list(expected_columns) + [f"c{i}" for i in range(len(expected_columns), sample_cols)]
+    elif header_tokens is None:
+        header_tokens = [f"c{i}" for i in range(sample_cols)]
 
     csv_buf = StringIO("\n".join(data_lines))
     df = pd.read_csv(csv_buf, sep=r"\s+", header=None, engine="python")

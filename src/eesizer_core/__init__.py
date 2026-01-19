@@ -33,7 +33,7 @@ from .contracts.strategy import Strategy, StrategyConfig, OptimizationBudget
 from .contracts.provenance import ArtifactFingerprint, Provenance, RunManifest
 from .baselines import LegacyMetricsBaseline
 from .strategies import NoOptBaselineStrategy, PatchLoopStrategy, evaluate_objectives
-from .policies import FixedSequencePolicy, RandomNudgePolicy
+from .policies import FixedSequencePolicy, RandomNudgePolicy, GreedyCoordinatePolicy
 
 __all__ = [
     # artifacts
@@ -84,6 +84,7 @@ __all__ = [
     # policies
     "FixedSequencePolicy",
     "RandomNudgePolicy",
+    "GreedyCoordinatePolicy",
     # provenance
     "ArtifactFingerprint",
     "Provenance",

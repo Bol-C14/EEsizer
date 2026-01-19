@@ -89,7 +89,7 @@ def test_ngspice_runner_rewrites_only_wrdata(tmp_path):
     ctx = RunContext(workspace_root=workspace)
     deck_text = """* ac.csv mention should stay
 .control
-wrdata __OUT__/ac.csv frequency real(v(out)) imag(v(out))
+wrdata __OUT__/ac.csv v(out)
 .endc
 .end
 """
