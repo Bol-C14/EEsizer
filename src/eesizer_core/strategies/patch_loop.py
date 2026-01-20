@@ -220,6 +220,19 @@ def _count_guard_fails(history: list[dict[str, Any]]) -> dict[str, int]:
     return {"hard": hard, "soft": soft}
 
 
+def _collect_llm_files(recorder: RunRecorder | None) -> list[str]:
+    if recorder is None:
+        return []
+    llm_dir = recorder.run_dir / "llm"
+    if not llm_dir.exists():
+        return []
+    llm_files: list[str] = []
+    for path in llm_dir.rglob("*"):
+        if path.is_file():
+            llm_files.append(recorder.relpath(path))
+    return sorted(llm_files)
+
+
 def _finalize_run(
     recorder: RunRecorder | None,
     manifest: Any,
@@ -268,6 +281,10 @@ def _finalize_run(
     if manifest is not None:
         manifest.result_summary = summary
         manifest.timestamp_end = datetime.now(timezone.utc).isoformat()
+        if recorder is not None:
+            llm_files = _collect_llm_files(recorder)
+            if llm_files:
+                manifest.files["llm"] = llm_files
         try:
             if recorder is not None:
                 recorder.write_json("run_manifest.json", manifest.to_dict())
@@ -721,6 +738,7 @@ class PatchLoopStrategy(Strategy):
                     "best_score": best_score,
                     "current_score": current_score,
                     "param_values": dict(param_values),
+                    "attempt": attempt,
                 }
                 if param_value_errors:
                     obs_notes["param_value_errors"] = list(param_value_errors)

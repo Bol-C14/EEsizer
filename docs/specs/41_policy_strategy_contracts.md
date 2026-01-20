@@ -26,6 +26,7 @@ Observation is a dataclass (`eesizer_core.contracts.policy.Observation`) and SHO
   - Recommended: `notes["current_score"]` and `notes["best_score"]` as scalar objective scores.
   - Recommended: `notes["param_values"]` mapping param_id -> numeric value for current state.
   - Recommended: `notes["last_guard_report"]` with structured guard feedback from the last attempt.
+  - Recommended: `notes["attempt"]` retry index within the current iteration.
 
 Policies SHOULD NOT require direct file access.
 

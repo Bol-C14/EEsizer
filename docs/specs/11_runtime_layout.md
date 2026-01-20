@@ -30,6 +30,14 @@ runs/<run_id>/
     param_space.json
     cfg.json
     signature.txt
+  llm/
+    llm_i001_a00/
+      request.json
+      prompt.txt
+      response.txt
+      parsed_patch.json
+      parse_error.txt
+      call_error.txt
   history/
     iterations.jsonl
     summary.json
@@ -69,6 +77,7 @@ Examples:
 - Stage names MUST be filesystem-safe.
 - Stage names SHOULD be unique within a run.
 - When a strategy retries within the same iteration, stage names SHOULD include an attempt suffix (e.g., `ac_i003_a01`) to avoid overwriting artifacts.
+- LLM stages SHOULD use `llm/llm_i{iter}_a{attempt}` and append retry suffixes (`_r01`) when parsing is retried.
 
 ## 11.3 Recommended stage contents
 
@@ -89,6 +98,7 @@ A `run_manifest.json` is REQUIRED for end-to-end strategies and should contain:
 - run metadata (time, environment, policy/strategy)
 - inputs (source/spec/param_space hashes + signature)
 - file index for inputs/history/provenance/best
+- if LLM is used, a list of `llm/` artifact paths
 - result summary (stop reason, best iter/score, sim runs total/ok/failed)
 
 Template:

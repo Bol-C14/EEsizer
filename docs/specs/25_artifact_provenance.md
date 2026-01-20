@@ -99,3 +99,12 @@ Each line is a JSON object derived from `Provenance`, containing at minimum:
 - `inputs`, `outputs` (sha256 maps)
 - `command` (if applicable)
 - `notes` (tool metadata, cwd, return code)
+
+### LLM call expectations
+
+For `llm_call`, `notes` SHOULD include:
+- `provider`, `model`, `temperature`, `max_tokens` (if set)
+- `response_schema_name` (if provided)
+- `usage` metadata when available
+
+Inputs SHOULD include a prompt or request hash and outputs SHOULD include a response hash.

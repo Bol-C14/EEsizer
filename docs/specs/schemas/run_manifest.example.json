@@ -15,7 +15,11 @@
     "python_version": "3.12",
     "platform": "linux",
     "ngspice_version": "ngspice-xx",
-    "policy_name": "LLMPatchPolicy",
+    "llm_provider": "openai",
+    "llm_model": "gpt-4.1",
+    "llm_temperature": 0.2,
+    "llm_response_schema": "patch.schema.json",
+    "policy_name": "llm_patch",
     "policy_version": "0.1.0",
     "strategy_name": "patch_loop",
     "strategy_version": "0.1.0"
@@ -29,6 +33,11 @@
     "history/iterations.jsonl": "history/iterations.jsonl",
     "history/summary.json": "history/summary.json",
     "provenance/operator_calls.jsonl": "provenance/operator_calls.jsonl",
+    "llm": [
+      "llm/llm_i001_a00/prompt.txt",
+      "llm/llm_i001_a00/response.txt",
+      "llm/llm_i001_a00/parsed_patch.json"
+    ],
     "best/best.sp": "best/best.sp",
     "best/best_metrics.json": "best/best_metrics.json"
   },
