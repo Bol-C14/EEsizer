@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional
 import json
@@ -17,7 +16,6 @@ from ..contracts import (
     SimRequest,
     StrategyConfig,
 )
-from ..contracts.artifacts import PatchOp
 from ..contracts.enums import SimKind, StopReason
 from ..contracts.errors import MetricError, SimulationError, ValidationError
 from ..contracts.guards import GuardCheck, GuardReport
@@ -38,17 +36,18 @@ from ..strategies.objective_eval import evaluate_objectives
 from ..domain.spice.params import ParamInferenceRules, infer_param_space_from_ir
 from ..domain.spice.patching import extract_param_values
 from ..runtime.recorder import RunRecorder
-
-
-def _patch_to_dict(patch: Patch) -> dict[str, Any]:
-    return {
-        "ops": [
-            {"param": op.param, "op": getattr(op.op, "value", op.op), "value": op.value, "why": getattr(op, "why", "")}
-            for op in patch.ops
-        ],
-        "stop": patch.stop,
-        "notes": patch.notes,
-    }
+from ..runtime.recording_utils import (
+    attempt_record,
+    finalize_run,
+    guard_failures,
+    guard_report_to_dict,
+    param_space_to_dict,
+    patch_to_dict,
+    record_history_entry,
+    record_operator_result,
+    spec_to_dict,
+    strategy_cfg_to_dict,
+)
 
 
 def _llm_patch_payload(patch: Patch) -> dict[str, Any]:
@@ -170,257 +169,6 @@ def _make_observation(
     )
 
 
-def _objective_to_dict(obj: Any) -> dict[str, Any]:
-    return {
-        "metric": obj.metric,
-        "target": obj.target,
-        "tol": obj.tol,
-        "weight": obj.weight,
-        "sense": obj.sense,
-    }
-
-
-def _constraint_to_dict(constraint: Any) -> dict[str, Any]:
-    return {"kind": constraint.kind, "data": dict(constraint.data)}
-
-
-def _spec_to_dict(spec: CircuitSpec) -> dict[str, Any]:
-    return {
-        "objectives": [_objective_to_dict(obj) for obj in spec.objectives],
-        "constraints": [_constraint_to_dict(c) for c in spec.constraints],
-        "observables": list(spec.observables),
-        "notes": dict(spec.notes),
-    }
-
-
-def _param_space_to_dict(param_space: ParamSpace) -> dict[str, Any]:
-    return {
-        "params": [
-            {
-                "param_id": p.param_id,
-                "unit": p.unit,
-                "lower": p.lower,
-                "upper": p.upper,
-                "frozen": p.frozen,
-                "tags": list(p.tags),
-            }
-            for p in param_space.params
-        ]
-    }
-
-
-def _strategy_cfg_to_dict(cfg: StrategyConfig, guard_cfg: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "budget": {
-            "max_iterations": cfg.budget.max_iterations,
-            "max_sim_runs": cfg.budget.max_sim_runs,
-            "timeout_s": cfg.budget.timeout_s,
-            "no_improve_patience": cfg.budget.no_improve_patience,
-        },
-        "seed": cfg.seed,
-        "notes": dict(cfg.notes),
-        "derived": {"guard_cfg": dict(guard_cfg)},
-    }
-
-
-def _metrics_to_dict(metrics: MetricsBundle) -> dict[str, Any]:
-    return {
-        name: {
-            "value": mv.value,
-            "unit": mv.unit,
-            "passed": mv.passed,
-            "details": dict(mv.details),
-        }
-        for name, mv in metrics.values.items()
-    }
-
-
-def _provenance_to_dict(prov: Any) -> dict[str, Any]:
-    return {
-        "operator": prov.operator,
-        "version": prov.version,
-        "start_time": prov.start_time,
-        "end_time": prov.end_time,
-        "duration_s": prov.duration_s(),
-        "command": prov.command,
-        "inputs": {k: v.sha256 for k, v in prov.inputs.items()},
-        "outputs": {k: v.sha256 for k, v in prov.outputs.items()},
-        "notes": dict(prov.notes),
-    }
-
-
-def _record_operator_result(recorder: RunRecorder | None, result: Any) -> None:
-    if recorder is None:
-        return
-    try:
-        payload = _provenance_to_dict(result.provenance)
-    except Exception:
-        return
-    recorder.append_jsonl("provenance/operator_calls.jsonl", payload)
-
-
-def _relativize_stage_map(stage_map: Mapping[str, str], recorder: RunRecorder | None) -> dict[str, str]:
-    if recorder is None:
-        return dict(stage_map)
-    return {str(k): recorder.relpath(v) for k, v in stage_map.items()}
-
-
-def _prepare_history_entry(entry: dict[str, Any], recorder: RunRecorder | None) -> dict[str, Any]:
-    payload = dict(entry)
-    if "sim_stages" in payload and isinstance(payload["sim_stages"], Mapping):
-        payload["sim_stages"] = _relativize_stage_map(payload["sim_stages"], recorder)
-    attempts = payload.get("attempts")
-    if isinstance(attempts, list):
-        updated_attempts = []
-        for attempt in attempts:
-            attempt_payload = dict(attempt)
-            if "sim_stages" in attempt_payload and isinstance(attempt_payload["sim_stages"], Mapping):
-                attempt_payload["sim_stages"] = _relativize_stage_map(attempt_payload["sim_stages"], recorder)
-            updated_attempts.append(attempt_payload)
-        payload["attempts"] = updated_attempts
-    return payload
-
-
-def _record_history_entry(recorder: RunRecorder | None, entry: dict[str, Any]) -> None:
-    if recorder is None:
-        return
-    payload = _prepare_history_entry(entry, recorder)
-    recorder.append_jsonl("history/iterations.jsonl", payload)
-
-
-def _count_guard_fails(history: list[dict[str, Any]]) -> dict[str, int]:
-    hard = 0
-    soft = 0
-    for entry in history:
-        guard = entry.get("guard")
-        if not isinstance(guard, dict):
-            continue
-        hard += len(guard.get("hard_fails", []) or [])
-        soft += len(guard.get("soft_fails", []) or [])
-    return {"hard": hard, "soft": soft}
-
-
-def _collect_llm_files(recorder: RunRecorder | None) -> list[str]:
-    if recorder is None:
-        return []
-    llm_dir = recorder.run_dir / "llm"
-    if not llm_dir.exists():
-        return []
-    llm_files: list[str] = []
-    for path in llm_dir.rglob("*"):
-        if path.is_file():
-            llm_files.append(recorder.relpath(path))
-    return sorted(llm_files)
-
-
-def _finalize_run(
-    recorder: RunRecorder | None,
-    manifest: Any,
-    best_source: CircuitSource | None,
-    best_metrics: MetricsBundle,
-    history: list[dict[str, Any]],
-    stop_reason: StopReason | None,
-    best_score: float,
-    best_iter: int | None,
-    sim_runs: int,
-    sim_runs_ok: int,
-    sim_runs_failed: int,
-    best_metrics_payload: Mapping[str, Any] | None = None,
-) -> list[str]:
-    errors: list[str] = []
-    summary = {
-        "stop_reason": stop_reason.value if stop_reason else None,
-        "best_iter": best_iter,
-        "best_score": best_score,
-        "sim_runs_total": sim_runs,
-        "sim_runs_ok": sim_runs_ok,
-        "sim_runs_failed": sim_runs_failed,
-        "guard_fail_counts": _count_guard_fails(history),
-    }
-    if recorder is not None:
-        try:
-            recorder.write_json("history/summary.json", summary)
-        except Exception as exc:
-            errors.append(f"summary_write_failed: {exc}")
-        if best_source is not None:
-            try:
-                recorder.write_text("best/best.sp", best_source.text)
-            except Exception as exc:
-                errors.append(f"best_sp_write_failed: {exc}")
-        try:
-            payload = best_metrics_payload if best_metrics_payload is not None else _metrics_to_dict(best_metrics)
-            recorder.write_json("best/best_metrics.json", payload)
-        except Exception as exc:
-            errors.append(f"best_metrics_write_failed: {exc}")
-        if errors:
-            summary["recording_errors"] = list(errors)
-            try:
-                recorder.write_json("history/summary.json", summary)
-            except Exception:
-                pass
-    if manifest is not None:
-        manifest.result_summary = summary
-        manifest.timestamp_end = datetime.now(timezone.utc).isoformat()
-        if recorder is not None:
-            llm_files = _collect_llm_files(recorder)
-            if llm_files:
-                manifest.files["llm"] = llm_files
-        try:
-            if recorder is not None:
-                recorder.write_json("run_manifest.json", manifest.to_dict())
-            else:
-                manifest.save_json(Path(manifest.workspace) / "run_manifest.json")
-        except Exception as exc:
-            errors.append(f"manifest_write_failed: {exc}")
-    return errors
-
-
-def _guard_check_to_dict(check: GuardCheck) -> dict[str, Any]:
-    return {
-        "name": check.name,
-        "ok": check.ok,
-        "severity": check.severity,
-        "reasons": list(check.reasons),
-        "data": dict(check.data),
-    }
-
-
-def _guard_report_to_dict(report: GuardReport) -> dict[str, Any]:
-    return {
-        "ok": report.ok,
-        "checks": [_guard_check_to_dict(c) for c in report.checks],
-        "hard_fails": [c.name for c in report.hard_fails],
-        "soft_fails": [c.name for c in report.soft_fails],
-    }
-
-
-def _guard_failures(report: GuardReport) -> list[str]:
-    reasons: list[str] = []
-    for check in report.hard_fails:
-        reasons.extend(check.reasons)
-    if not reasons:
-        for check in report.soft_fails:
-            reasons.extend(check.reasons)
-    return reasons
-
-
-def _attempt_record(
-    attempt: int,
-    patch: Patch | None,
-    report: GuardReport | None,
-    stage_map: Mapping[str, str] | None = None,
-    warnings: list[str] | None = None,
-) -> dict[str, Any]:
-    return {
-        "attempt": attempt,
-        "patch": _patch_to_dict(patch) if patch else None,
-        "guard": _guard_report_to_dict(report) if report else None,
-        "errors": _guard_failures(report) if report else [],
-        "sim_stages": dict(stage_map or {}),
-        "warnings": list(warnings or []),
-    }
-
-
 MeasureFn = Callable[[CircuitSource, int], MetricsBundle]
 
 
@@ -496,11 +244,11 @@ class PatchLoopStrategy(Strategy):
         for kind, names in metric_groups.items():
             plan = _sim_plan_for_kind(kind)
             deck_res = self.deck_build_op.run({"circuit_source": source, "sim_plan": plan, "sim_kind": kind}, ctx=None)
-            _record_operator_result(recorder, deck_res)
+            record_operator_result(recorder, deck_res)
             deck = deck_res.outputs["deck"]
             stage_name = f"{kind.value}_i{iter_idx:03d}_a{attempt_idx:02d}"
             run_res = self.sim_run_op.run({"deck": deck, "stage": stage_name}, ctx)
-            _record_operator_result(recorder, run_res)
+            record_operator_result(recorder, run_res)
             if manifest is not None:
                 version = run_res.provenance.notes.get("ngspice_version")
                 path = run_res.provenance.notes.get("ngspice_path")
@@ -510,7 +258,7 @@ class PatchLoopStrategy(Strategy):
                     manifest.environment.setdefault("ngspice_path", path)
             raw = run_res.outputs["raw_data"]
             metrics_res = self.metrics_op.run({"raw_data": raw, "metric_names": names}, ctx=None)
-            _record_operator_result(recorder, metrics_res)
+            record_operator_result(recorder, metrics_res)
             bundles.append(metrics_res.outputs["metrics"])
             stage_map[kind.value] = str(raw.run_dir)
             warnings.extend(deck_res.warnings)
@@ -543,7 +291,7 @@ class PatchLoopStrategy(Strategy):
             },
             ctx=None,
         )
-        _record_operator_result(recorder, sig_result)
+        record_operator_result(recorder, sig_result)
         sig_res = sig_result.outputs
         circuit_ir = sig_res["circuit_ir"]
         signature = sig_res["signature"]
@@ -594,9 +342,9 @@ class PatchLoopStrategy(Strategy):
                     manifest.environment.setdefault("llm_seed", seed)
             if hasattr(self.policy, "response_schema_name"):
                 manifest.environment.setdefault("llm_response_schema", getattr(self.policy, "response_schema_name"))
-            spec_payload = _spec_to_dict(spec)
-            param_payload = _param_space_to_dict(param_space)
-            cfg_payload = _strategy_cfg_to_dict(cfg, guard_cfg)
+            spec_payload = spec_to_dict(spec)
+            param_payload = param_space_to_dict(param_space)
+            cfg_payload = strategy_cfg_to_dict(cfg, guard_cfg)
             manifest.inputs.update(
                 {
                     "netlist_sha256": stable_hash_str(source.text),
@@ -671,10 +419,10 @@ class PatchLoopStrategy(Strategy):
                     data={"error_type": type(exc).__name__},
                 )
                 baseline_guard_res = self.guard_chain_op.run({"checks": [check]}, ctx=None)
-                _record_operator_result(recorder, baseline_guard_res)
+                record_operator_result(recorder, baseline_guard_res)
                 baseline_guard = baseline_guard_res.outputs["report"]
-                baseline_errors = _guard_failures(baseline_guard)
-                baseline_attempts.append(_attempt_record(attempt, None, baseline_guard))
+                baseline_errors = guard_failures(baseline_guard)
+                baseline_attempts.append(attempt_record(attempt, None, baseline_guard))
                 if attempt >= self.max_patch_retries:
                     break
                 continue
@@ -683,13 +431,13 @@ class PatchLoopStrategy(Strategy):
                 {"metrics": metrics0, "spec": spec, "stage_map": stage_map0, "guard_cfg": guard_cfg},
                 ctx=None,
             )
-            _record_operator_result(recorder, behavior_check_res)
+            record_operator_result(recorder, behavior_check_res)
             behavior_check = behavior_check_res.outputs["check"]
             baseline_guard_res = self.guard_chain_op.run({"checks": [behavior_check]}, ctx=None)
-            _record_operator_result(recorder, baseline_guard_res)
+            record_operator_result(recorder, baseline_guard_res)
             baseline_guard = baseline_guard_res.outputs["report"]
-            baseline_attempts.append(_attempt_record(attempt, None, baseline_guard, stage_map0, warnings0))
-            baseline_errors = _guard_failures(baseline_guard)
+            baseline_attempts.append(attempt_record(attempt, None, baseline_guard, stage_map0, warnings0))
+            baseline_errors = guard_failures(baseline_guard)
 
             if not baseline_guard.ok:
                 if attempt >= self.max_patch_retries:
@@ -716,12 +464,12 @@ class PatchLoopStrategy(Strategy):
                     "sim_stages": stage_map0,
                     "warnings": warnings0,
                     "errors": baseline_errors,
-                    "guard": _guard_report_to_dict(baseline_guard) if baseline_guard else None,
+                    "guard": guard_report_to_dict(baseline_guard) if baseline_guard else None,
                     "attempts": baseline_attempts,
                 }
             )
-            _record_history_entry(recorder, history[-1])
-            recording_errors = _finalize_run(
+            record_history_entry(recorder, history[-1])
+            recording_errors = finalize_run(
                 recorder=recorder,
                 manifest=manifest,
                 best_source=source,
@@ -769,14 +517,14 @@ class PatchLoopStrategy(Strategy):
                 "sim_stages": stage_map0,
                 "warnings": warnings0,
                 "errors": baseline_errors,
-                "guard": _guard_report_to_dict(baseline_guard) if baseline_guard else None,
+                "guard": guard_report_to_dict(baseline_guard) if baseline_guard else None,
                 "attempts": baseline_attempts,
             }
         )
-        _record_history_entry(recorder, history[-1])
+        record_history_entry(recorder, history[-1])
 
         if stop_reason is StopReason.reached_target:
-            recording_errors = _finalize_run(
+            recording_errors = finalize_run(
                 recorder=recorder,
                 manifest=manifest,
                 best_source=best_source,
@@ -855,7 +603,7 @@ class PatchLoopStrategy(Strategy):
                 if last_guard_failures:
                     obs_notes["last_guard_failures"] = list(last_guard_failures)
                 if last_guard_report is not None:
-                    obs_notes["last_guard_report"] = _guard_report_to_dict(last_guard_report)
+                    obs_notes["last_guard_report"] = guard_report_to_dict(last_guard_report)
 
                 obs = _make_observation(
                     spec=spec,
@@ -874,7 +622,7 @@ class PatchLoopStrategy(Strategy):
                     patch = self.policy.propose(obs, ctx)
                 if patch.stop:
                     stop_reason = StopReason.policy_stop
-                    attempts.append(_attempt_record(attempt, patch, None))
+                    attempts.append(attempt_record(attempt, patch, None))
                     break
 
                 new_source = cur_source
@@ -892,16 +640,16 @@ class PatchLoopStrategy(Strategy):
                     },
                     ctx=None,
                 )
-                _record_operator_result(recorder, pre_check_res)
+                record_operator_result(recorder, pre_check_res)
                 pre_check = pre_check_res.outputs["check"]
                 checks.append(pre_check)
                 if not pre_check.ok:
                     guard_chain_res = self.guard_chain_op.run({"checks": checks}, ctx=None)
-                    _record_operator_result(recorder, guard_chain_res)
+                    record_operator_result(recorder, guard_chain_res)
                     guard_report = guard_chain_res.outputs["report"]
-                    last_guard_failures = _guard_failures(guard_report)
+                    last_guard_failures = guard_failures(guard_report)
                     last_guard_report = guard_report
-                    attempts.append(_attempt_record(attempt, patch, guard_report))
+                    attempts.append(attempt_record(attempt, patch, guard_report))
                     if attempt >= self.max_patch_retries:
                         stop_reason = StopReason.guard_failed
                     continue
@@ -911,7 +659,7 @@ class PatchLoopStrategy(Strategy):
                         {"source": cur_source, "param_space": param_space, "patch": patch, **apply_opts},
                         ctx=None,
                     )
-                    _record_operator_result(recorder, apply_res)
+                    record_operator_result(recorder, apply_res)
                     apply_outputs = apply_res.outputs
                     new_source = apply_outputs["source"]
                     new_signature = apply_outputs["topology_signature"]
@@ -927,11 +675,11 @@ class PatchLoopStrategy(Strategy):
                         )
                     )
                     guard_chain_res = self.guard_chain_op.run({"checks": checks}, ctx=None)
-                    _record_operator_result(recorder, guard_chain_res)
+                    record_operator_result(recorder, guard_chain_res)
                     guard_report = guard_chain_res.outputs["report"]
-                    last_guard_failures = _guard_failures(guard_report)
+                    last_guard_failures = guard_failures(guard_report)
                     last_guard_report = guard_report
-                    attempts.append(_attempt_record(attempt, patch, guard_report))
+                    attempts.append(attempt_record(attempt, patch, guard_report))
                     if attempt >= self.max_patch_retries:
                         stop_reason = StopReason.guard_failed
                     continue
@@ -940,16 +688,16 @@ class PatchLoopStrategy(Strategy):
                     {"signature_before": signature_before, "signature_after": new_signature},
                     ctx=None,
                 )
-                _record_operator_result(recorder, topo_check_res)
+                record_operator_result(recorder, topo_check_res)
                 topo_check = topo_check_res.outputs["check"]
                 checks.append(topo_check)
                 if not topo_check.ok:
                     guard_chain_res = self.guard_chain_op.run({"checks": checks}, ctx=None)
-                    _record_operator_result(recorder, guard_chain_res)
+                    record_operator_result(recorder, guard_chain_res)
                     guard_report = guard_chain_res.outputs["report"]
-                    last_guard_failures = _guard_failures(guard_report)
+                    last_guard_failures = guard_failures(guard_report)
                     last_guard_report = guard_report
-                    attempts.append(_attempt_record(attempt, patch, guard_report))
+                    attempts.append(attempt_record(attempt, patch, guard_report))
                     if attempt >= self.max_patch_retries:
                         stop_reason = StopReason.guard_failed
                     continue
@@ -959,7 +707,7 @@ class PatchLoopStrategy(Strategy):
                         {"source": new_source, "circuit_ir": new_circuit_ir, "spec": spec},
                         ctx=None,
                     )
-                    _record_operator_result(recorder, formal_check_res)
+                    record_operator_result(recorder, formal_check_res)
                     formal_check = formal_check_res.outputs["check"]
                     checks.append(formal_check)
 
@@ -988,11 +736,11 @@ class PatchLoopStrategy(Strategy):
                         )
                     )
                     guard_chain_res = self.guard_chain_op.run({"checks": checks}, ctx=None)
-                    _record_operator_result(recorder, guard_chain_res)
+                    record_operator_result(recorder, guard_chain_res)
                     guard_report = guard_chain_res.outputs["report"]
-                    last_guard_failures = _guard_failures(guard_report)
+                    last_guard_failures = guard_failures(guard_report)
                     last_guard_report = guard_report
-                    attempts.append(_attempt_record(attempt, patch, guard_report))
+                    attempts.append(attempt_record(attempt, patch, guard_report))
                     if attempt >= self.max_patch_retries:
                         stop_reason = StopReason.guard_failed
                     continue
@@ -1001,23 +749,23 @@ class PatchLoopStrategy(Strategy):
                     {"metrics": metrics_i, "spec": spec, "stage_map": stage_map_i, "guard_cfg": guard_cfg},
                     ctx=None,
                 )
-                _record_operator_result(recorder, behavior_check_res)
+                record_operator_result(recorder, behavior_check_res)
                 behavior_check = behavior_check_res.outputs["check"]
                 checks.append(behavior_check)
 
                 guard_chain_res = self.guard_chain_op.run({"checks": checks}, ctx=None)
-                _record_operator_result(recorder, guard_chain_res)
+                record_operator_result(recorder, guard_chain_res)
                 guard_report = guard_chain_res.outputs["report"]
-                attempts.append(_attempt_record(attempt, patch, guard_report, stage_map_i, warnings_i))
+                attempts.append(attempt_record(attempt, patch, guard_report, stage_map_i, warnings_i))
 
                 if not guard_report.ok:
-                    last_guard_failures = _guard_failures(guard_report)
+                    last_guard_failures = guard_failures(guard_report)
                     last_guard_report = guard_report
                     if attempt >= self.max_patch_retries:
                         stop_reason = StopReason.guard_failed
                     continue
 
-                errors = _guard_failures(guard_report)
+                errors = guard_failures(guard_report)
                 success = True
                 last_guard_report = guard_report
                 break
@@ -1029,7 +777,7 @@ class PatchLoopStrategy(Strategy):
                 history.append(
                     {
                         "iteration": i,
-                        "patch": _patch_to_dict(patch) if patch else None,
+                        "patch": patch_to_dict(patch) if patch else None,
                         "signature_before": signature_before,
                         "signature_after": new_signature,
                         "metrics": {k: v.value for k, v in cur_metrics.values.items()},
@@ -1039,11 +787,11 @@ class PatchLoopStrategy(Strategy):
                         "sim_stages": {},
                         "warnings": [],
                         "errors": errors,
-                        "guard": _guard_report_to_dict(guard_report) if guard_report else None,
+                        "guard": guard_report_to_dict(guard_report) if guard_report else None,
                         "attempts": attempts,
                     }
                 )
-                _record_history_entry(recorder, history[-1])
+                record_history_entry(recorder, history[-1])
                 break
 
             if not success or metrics_i is None:
@@ -1052,7 +800,7 @@ class PatchLoopStrategy(Strategy):
                 history.append(
                     {
                         "iteration": i,
-                        "patch": _patch_to_dict(patch) if patch else None,
+                        "patch": patch_to_dict(patch) if patch else None,
                         "signature_before": signature_before,
                         "signature_after": new_signature,
                         "metrics": {k: v.value for k, v in cur_metrics.values.items()},
@@ -1062,11 +810,11 @@ class PatchLoopStrategy(Strategy):
                         "sim_stages": {},
                         "warnings": [],
                         "errors": errors,
-                        "guard": _guard_report_to_dict(guard_report) if guard_report else None,
+                        "guard": guard_report_to_dict(guard_report) if guard_report else None,
                         "attempts": attempts,
                     }
                 )
-                _record_history_entry(recorder, history[-1])
+                record_history_entry(recorder, history[-1])
                 break
 
             # Measure after patch (successful guard chain)
@@ -1090,7 +838,7 @@ class PatchLoopStrategy(Strategy):
             history.append(
                 {
                     "iteration": i,
-                    "patch": _patch_to_dict(patch) if patch else None,
+                    "patch": patch_to_dict(patch) if patch else None,
                     "signature_before": signature_before,
                     "signature_after": cur_signature,
                     "metrics": {k: v.value for k, v in metrics_i.values.items()},
@@ -1101,11 +849,11 @@ class PatchLoopStrategy(Strategy):
                     "sim_stages": stage_map_i,
                     "warnings": warnings_i,
                     "errors": errors,
-                    "guard": _guard_report_to_dict(guard_report) if guard_report else None,
+                    "guard": guard_report_to_dict(guard_report) if guard_report else None,
                     "attempts": attempts,
                 }
             )
-            _record_history_entry(recorder, history[-1])
+            record_history_entry(recorder, history[-1])
 
             cur_metrics = metrics_i
 
@@ -1125,7 +873,7 @@ class PatchLoopStrategy(Strategy):
         if stop_reason is None:
             stop_reason = StopReason.max_iterations
 
-        recording_errors = _finalize_run(
+        recording_errors = finalize_run(
             recorder=recorder,
             manifest=manifest,
             best_source=best_source,

@@ -195,7 +195,7 @@ A minimal runnable example must exist (even if not part of CI):
 Acceptance checks
 - With ngspice installed:
 ```
-python examples/run_ac_once.py
+PYTHONPATH=src python examples/run_ac_once.py
 ```
 produces a run folder with:
 - deck

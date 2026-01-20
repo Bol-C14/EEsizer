@@ -63,7 +63,7 @@ class RunRecorder:
 
     def _write_text(self, rel_path: str, text: str) -> Path:
         """Write UTF-8 text to a path under run_dir."""
-        path = self.run_dir / rel_path
+        path = self._resolve_rel_path(rel_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         return path
@@ -81,7 +81,7 @@ class RunRecorder:
 
     def write_json(self, rel_path: str, payload: Any) -> Path:
         """Serialize payload to JSON at a run-relative path."""
-        path = self.run_dir / rel_path
+        path = self._resolve_rel_path(rel_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         normalized = self._normalize_payload(payload)
         path.write_text(json.dumps(normalized, indent=2, sort_keys=True), encoding="utf-8")
@@ -89,10 +89,24 @@ class RunRecorder:
 
     def append_jsonl(self, rel_path: str, payload: Any) -> Path:
         """Append one JSON record (per line) to a run-relative path."""
-        path = self.run_dir / rel_path
+        path = self._resolve_rel_path(rel_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         normalized = self._normalize_payload(payload)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(normalized, sort_keys=True))
             fh.write("\n")
         return path
+
+    def _resolve_rel_path(self, rel_path: str) -> Path:
+        """Resolve a safe run-relative path and block traversal."""
+        path = Path(rel_path)
+        if path.is_absolute() or path.drive:
+            raise ValueError("rel_path must be relative to run_dir")
+        if any(part == ".." for part in path.parts):
+            raise ValueError("rel_path must not contain '..'")
+        resolved = (self.run_dir / path).resolve()
+        try:
+            resolved.relative_to(self.run_dir)
+        except Exception as exc:
+            raise ValueError("rel_path escapes run_dir") from exc
+        return resolved

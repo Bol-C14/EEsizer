@@ -7,7 +7,7 @@ import re
 
 
 _CONTROL_BLOCK_PATTERN = re.compile(r"\.control.*?\.endc", re.IGNORECASE | re.DOTALL)
-_INCLUDE_PATTERN = re.compile(r"^\s*\.include\s+['\"]?(?P<path>[^'\"\\s]+)['\"]?", re.IGNORECASE)
+_INCLUDE_PATTERN = re.compile(r"^\s*\.include\s+(?P<path>(?:\"[^\"]+\"|'[^']+'|\S+))", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,13 @@ class SanitizeResult:
 
 def _strip_control_blocks(netlist_text: str) -> str:
     return _CONTROL_BLOCK_PATTERN.sub("", netlist_text)
+
+
+def _normalize_include_path(raw_path: str) -> str:
+    raw_path = raw_path.strip()
+    if len(raw_path) >= 2 and raw_path[0] == raw_path[-1] and raw_path[0] in {"'", '"'}:
+        return raw_path[1:-1].strip()
+    return raw_path
 
 
 def normalize_spice_lines(lines: List[str]) -> List[str]:
@@ -63,7 +70,13 @@ def sanitize_spice_netlist(netlist_text: str, max_lines: int = 5000) -> Sanitize
 
         match = _INCLUDE_PATTERN.match(line)
         if match:
-            inc_path = match.group("path")
+            inc_path = _normalize_include_path(match.group("path"))
+            if not inc_path:
+                warnings.append("dropped empty include path")
+                continue
+            if any(token in inc_path for token in ("$", "~")):
+                warnings.append(f"dropped unsafe include: {inc_path}")
+                continue
             path_obj = Path(inc_path)
             if path_obj.is_absolute() or ".." in path_obj.parts:
                 warnings.append(f"dropped unsafe include: {inc_path}")

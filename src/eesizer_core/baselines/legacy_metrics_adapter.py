@@ -19,20 +19,20 @@ from ..domain.spice.params import ParamInferenceRules, infer_param_space_from_ir
 from ..operators.guards import BehaviorGuardOperator, GuardChainOperator
 from ..operators.netlist import TopologySignatureOperator
 from ..runtime.recorder import RunRecorder
+from ..runtime.recording_utils import (
+    attempt_record,
+    finalize_run,
+    guard_failures,
+    guard_report_to_dict,
+    metrics_to_dict,
+    param_space_to_dict,
+    record_history_entry,
+    record_operator_result,
+    spec_to_dict,
+    strategy_cfg_to_dict,
+)
 from ..sim.ngspice_runner import resolve_ngspice_executable, _probe_ngspice_version
 from ..strategies.objective_eval import evaluate_objectives
-from ..strategies.patch_loop import (
-    _attempt_record,
-    _finalize_run,
-    _guard_failures,
-    _guard_report_to_dict,
-    _metrics_to_dict,
-    _param_space_to_dict,
-    _record_history_entry,
-    _record_operator_result,
-    _spec_to_dict,
-    _strategy_cfg_to_dict,
-)
 from ..metrics.aliases import canonicalize_metrics
 
 
@@ -260,7 +260,7 @@ class LegacyMetricsBaseline(Strategy):
             },
             ctx=None,
         )
-        _record_operator_result(recorder, sig_result)
+        record_operator_result(recorder, sig_result)
         sig_res = sig_result.outputs
         circuit_ir = sig_res["circuit_ir"]
         signature = sig_res["signature"]
@@ -281,9 +281,9 @@ class LegacyMetricsBaseline(Strategy):
         if manifest is not None:
             manifest.environment.setdefault("strategy_name", self.name)
             manifest.environment.setdefault("strategy_version", self.version)
-            spec_payload = _spec_to_dict(spec)
-            param_payload = _param_space_to_dict(param_space)
-            cfg_payload = _strategy_cfg_to_dict(cfg, guard_cfg)
+            spec_payload = spec_to_dict(spec)
+            param_payload = param_space_to_dict(param_space)
+            cfg_payload = strategy_cfg_to_dict(cfg, guard_cfg)
             manifest.inputs.update(
                 {
                     "netlist_sha256": stable_hash_str(source.text),
@@ -402,9 +402,9 @@ class LegacyMetricsBaseline(Strategy):
                 data={"error_type": type(exc).__name__},
             )
             guard_res = self.guard_chain_op.run({"checks": [check]}, ctx=None)
-            _record_operator_result(recorder, guard_res)
+            record_operator_result(recorder, guard_res)
             guard_report = guard_res.outputs["report"]
-            errors = _guard_failures(guard_report)
+            errors = guard_failures(guard_report)
         finally:
             if prev_path is None:
                 os.environ.pop("NGSPICE_PATH", None)
@@ -418,12 +418,12 @@ class LegacyMetricsBaseline(Strategy):
                 {"metrics": metrics_bundle, "spec": spec, "stage_map": stage_map, "guard_cfg": guard_cfg},
                 ctx=None,
             )
-            _record_operator_result(recorder, behavior_res)
+            record_operator_result(recorder, behavior_res)
             behavior_check = behavior_res.outputs["check"]
             guard_res = self.guard_chain_op.run({"checks": [behavior_check]}, ctx=None)
-            _record_operator_result(recorder, guard_res)
+            record_operator_result(recorder, guard_res)
             guard_report = guard_res.outputs["report"]
-            errors = _guard_failures(guard_report)
+            errors = guard_failures(guard_report)
 
         eval0 = evaluate_objectives(spec, metrics_bundle)
         history.append(
@@ -440,11 +440,11 @@ class LegacyMetricsBaseline(Strategy):
                 "sim_stages": stage_map,
                 "warnings": warnings,
                 "errors": errors,
-                "guard": _guard_report_to_dict(guard_report) if guard_report else None,
-                "attempts": [_attempt_record(0, None, guard_report, stage_map, warnings)],
+                "guard": guard_report_to_dict(guard_report) if guard_report else None,
+                "attempts": [attempt_record(0, None, guard_report, stage_map, warnings)],
             }
         )
-        _record_history_entry(recorder, history[-1])
+        record_history_entry(recorder, history[-1])
 
         provenance_notes = {"legacy_import_path": getattr(sim_utils, "__file__", "unavailable")}
         if ngspice_path and sim_utils is not None:
@@ -465,7 +465,7 @@ class LegacyMetricsBaseline(Strategy):
             notes=provenance_notes,
         )
 
-        recording_errors = _finalize_run(
+        recording_errors = finalize_run(
             recorder=recorder,
             manifest=manifest,
             best_source=source,
@@ -477,7 +477,7 @@ class LegacyMetricsBaseline(Strategy):
             sim_runs=sim_runs,
             sim_runs_ok=sim_runs_ok,
             sim_runs_failed=sim_runs_failed,
-            best_metrics_payload=canonicalize_metrics(_metrics_to_dict(metrics_bundle)),
+            best_metrics_payload=canonicalize_metrics(metrics_to_dict(metrics_bundle)),
         )
 
         return RunResult(

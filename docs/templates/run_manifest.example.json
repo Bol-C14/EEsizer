@@ -14,6 +14,7 @@
   "environment": {
     "python_version": "3.12",
     "platform": "linux",
+    "dependency_snapshot": ["numpy==1.26.4", "pandas==2.2.0"],
     "ngspice_version": "ngspice-xx",
     "llm_provider": "openai",
     "llm_model": "gpt-4.1",

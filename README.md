@@ -22,7 +22,7 @@ This repository has been refactored from a legacy notebook-based codebase into a
 * ✅ **Step 2:** SPICE netlist canonicalization + lightweight IR + topology signature guard
 * ✅ **Step 3:** Patch substrate (parameter-only editing with topology/schema guards)
 * ✅ **Step 4:** Simulation stack (DeckBuildOperator + NgspiceRunOperator + ComputeMetricsOperator + metrics registry)
-* 🚧 **Step 5 (in progress):** Strategy/Policy loops (PatchLoopStrategy + heuristic policies in repo)
+* ✅ **Step 5:** Strategy/Policy loops (PatchLoopStrategy + heuristic + LLM policies)
 
 > The `legacy/` directory contains old code and references.
 > New development happens in `src/eesizer_core/`.
@@ -223,10 +223,15 @@ This ordering is enforced to prevent inconsistent IR/signature generation.
 
 ## Usage: Run AC sim + metrics (Step 4)
 
-End-to-end demo (requires `ngspice` on PATH):
+End-to-end demo (requires `ngspice` on PATH). If you installed the package in editable mode
+(`pip install -e .`), you can omit `PYTHONPATH=src`:
 
 ```bash
 PYTHONPATH=src python examples/run_ac_once.py
+```
+
+```bash
+python examples/run_ac_once.py
 ```
 
 This builds an AC deck for `examples/rc_lowpass.sp`, runs ngspice into `examples/output/runs/<run_id>/ac_example`, and computes AC metrics (`ac_mag_db_at_1k`, `ac_unity_gain_freq`). If ngspice is missing, the example will skip gracefully.
@@ -350,11 +355,16 @@ Recommended test categories:
 
 ### `ModuleNotFoundError: eesizer_core`
 
-Fix:
+Fix (choose one):
 
 ```bash
 pip install -e .
 pytest
+```
+
+```bash
+PYTHONPATH=src pytest -q
+PYTHONPATH=src python examples/run_ac_once.py
 ```
 
 ### `.include` is removed or warned
@@ -371,15 +381,11 @@ If you need includes, use controlled relative paths and avoid `..` and absolute 
 
 ## Roadmap (Short)
 
-* Step 5: Strategy / Policy loops
-  * selection of policies (LLM / RL / BO / heuristics)
-  * budgets/stop conditions
-  * provenance + experiment tracking
-
-* Step 6+: Optimization and deployment
+* Step 6: Optimization and deployment
   * richer metrics + corners
   * multi-agent orchestration (policy selection + tool calling)
   * integration toward node transfer workflows
+  * performance: incremental IR updates for large netlists and long runs
 
 ---
 
@@ -388,6 +394,7 @@ If you need includes, use controlled relative paths and avoid `..` and absolute 
 * Keep `legacy/` read-only
 * Add new functionality under `src/eesizer_core/`
 * Every new operator/domain rule must have tests
+* Internal code should import explicit modules (e.g., `eesizer_core.contracts`, `eesizer_core.operators.*`); top-level re-exports are for demos/notebooks
 * Prefer small PRs:
 
   * one invariant / one operator / one test suite at a time

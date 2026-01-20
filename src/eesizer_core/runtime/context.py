@@ -10,6 +10,7 @@ import time
 import platform
 import sys
 from datetime import datetime, timezone
+import importlib
 
 from ..contracts.provenance import RunManifest
 from .recorder import RunRecorder
@@ -47,6 +48,9 @@ class RunContext:
                 "platform": platform.platform(),
                 "executable": sys.executable,
             }
+            dep_snapshot = _dependency_snapshot()
+            if dep_snapshot:
+                environment["dependency_snapshot"] = dep_snapshot
             self._manifest = RunManifest(
                 run_id=self.run_id,
                 workspace=self.run_dir(),
@@ -57,6 +61,30 @@ class RunContext:
                 notes=self.notes,
             )
         return self._manifest
+
+
+def _dependency_snapshot() -> list[str]:
+    """Collect a best-effort dependency snapshot for reproducibility."""
+    try:
+        metadata = importlib.import_module("importlib.metadata")
+    except Exception:
+        return []
+    try:
+        distributions = metadata.distributions()
+    except Exception:
+        return []
+
+    entries: list[str] = []
+    for dist in distributions:
+        try:
+            name = dist.metadata.get("Name")
+            version = dist.version
+        except Exception:
+            continue
+        if not name or not version:
+            continue
+        entries.append(f"{name}=={version}")
+    return sorted(set(entries), key=str.lower)
 
     def recorder(self) -> RunRecorder:
         """Return a RunRecorder bound to this run's directory."""

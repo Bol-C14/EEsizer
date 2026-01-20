@@ -9,7 +9,7 @@ from ...contracts.errors import ValidationError
 from ...contracts.guards import GuardCheck
 from ...contracts.operators import Operator, OperatorResult
 from ...contracts.provenance import ArtifactFingerprint, Provenance, stable_hash_json
-from ...domain.spice.patching import validate_patch, _parse_scalar_numeric
+from ...domain.spice.patching import validate_patch, parse_scalar_numeric
 
 
 def _current_param_value(cir: CircuitIR, param_id: str) -> Optional[str]:
@@ -41,7 +41,7 @@ def _requires_nonnegative(param_id: str, param_def: ParamDef | None) -> bool:
 
 
 def _parse_numeric(value: object) -> float:
-    parsed = _parse_scalar_numeric(value)  # uses shared domain parsing rules
+    parsed = parse_scalar_numeric(value)  # uses shared domain parsing rules
     if not math.isfinite(parsed):
         raise ValidationError(f"non-finite numeric value '{value}'")
     return parsed

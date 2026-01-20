@@ -56,7 +56,7 @@ def _candidate_or_current_numeric(
     if text is None:
         return None, f"param '{param_id}' missing current value"
     try:
-        return _parse_scalar_numeric(text), None
+        return parse_scalar_numeric(text), None
     except ValidationError:
         return None, f"param '{param_id}' has non-numeric current value '{text}'"
 
@@ -101,7 +101,7 @@ def validate_patch(
         candidate_val: Optional[float] = None
         if op.op == PatchOpType.set:
             try:
-                candidate_val = _parse_scalar_numeric(op.value)
+                candidate_val = parse_scalar_numeric(op.value)
             except ValidationError:
                 errors.append(f"param '{op.param}' has non-numeric patch value '{op.value}'")
                 candidate_val = None
@@ -110,12 +110,12 @@ def validate_patch(
                 errors.append(f"param '{op.param}' missing current value")
                 continue
             try:
-                current_val = _parse_scalar_numeric(current_val_text)
+                current_val = parse_scalar_numeric(current_val_text)
             except ValidationError:
                 errors.append(f"param '{op.param}' has non-numeric current value '{current_val_text}'")
                 continue
             try:
-                delta = _parse_scalar_numeric(op.value)
+                delta = parse_scalar_numeric(op.value)
             except ValidationError:
                 errors.append(f"param '{op.param}' has non-numeric patch value '{op.value}'")
                 continue
@@ -159,7 +159,7 @@ def validate_patch(
     return PatchValidationResult(ok=not all_errors, errors=all_errors, ratio_errors=ratio_errors)
 
 
-def _parse_scalar_numeric(value: Scalar) -> float:
+def parse_scalar_numeric(value: Scalar) -> float:
     if isinstance(value, bool):
         raise ValidationError("boolean values are not supported for numeric ops")
     if isinstance(value, (int, float)):
@@ -178,6 +178,10 @@ def _parse_scalar_numeric(value: Scalar) -> float:
     raise ValidationError(f"unsupported unit suffix '{suffix}' in value '{value}'")
 
 
+# Backwards-compatible alias for callers that used the private name.
+_parse_scalar_numeric = parse_scalar_numeric
+
+
 def extract_param_values(
     cir: CircuitIR,
     param_ids: Optional[Iterable[str]] = None,
@@ -194,7 +198,7 @@ def extract_param_values(
         if raw is None:
             continue
         try:
-            values[pid] = _parse_scalar_numeric(raw)
+            values[pid] = parse_scalar_numeric(raw)
         except ValidationError as exc:
             errors.append(f"param '{param_id}' has non-numeric value '{raw}': {exc}")
     return values, errors
@@ -245,12 +249,12 @@ def _apply_single_op_to_lines(
     if op.op == PatchOpType.set:
         new_val_text = _format_scalar(op.value)
     elif op.op == PatchOpType.add:
-        old_val = _parse_scalar_numeric(old_val_text)
-        delta = _parse_scalar_numeric(op.value)
+        old_val = parse_scalar_numeric(old_val_text)
+        delta = parse_scalar_numeric(op.value)
         new_val_text = repr(old_val + delta)
     elif op.op == PatchOpType.mul:
-        old_val = _parse_scalar_numeric(old_val_text)
-        factor = _parse_scalar_numeric(op.value)
+        old_val = parse_scalar_numeric(old_val_text)
+        factor = parse_scalar_numeric(op.value)
         new_val_text = repr(old_val * factor)
     else:
         raise ValidationError(f"unsupported op '{op.op}' for param '{op.param}'")

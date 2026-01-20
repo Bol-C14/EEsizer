@@ -23,22 +23,24 @@ from ..metrics.aliases import canonicalize_metrics
 from ..operators.guards import BehaviorGuardOperator, GuardChainOperator
 from ..operators.netlist import TopologySignatureOperator
 from ..runtime.recorder import RunRecorder
+from ..runtime.recording_utils import (
+    attempt_record,
+    finalize_run,
+    guard_failures,
+    guard_report_to_dict,
+    metrics_to_dict,
+    param_space_to_dict,
+    record_history_entry,
+    record_operator_result,
+    spec_to_dict,
+    strategy_cfg_to_dict,
+)
 from ..sim import DeckBuildOperator, NgspiceRunOperator
 from .objective_eval import evaluate_objectives
 from .patch_loop import (
-    _attempt_record,
-    _finalize_run,
     _group_metric_names_by_kind,
-    _guard_failures,
-    _guard_report_to_dict,
     _merge_metrics,
-    _metrics_to_dict,
-    _param_space_to_dict,
-    _record_history_entry,
-    _record_operator_result,
     _sim_plan_for_kind,
-    _spec_to_dict,
-    _strategy_cfg_to_dict,
 )
 
 
@@ -118,7 +120,7 @@ class NoOptBaselineStrategy(Strategy):
             },
             ctx=None,
         )
-        _record_operator_result(recorder, sig_result)
+        record_operator_result(recorder, sig_result)
         sig_res = sig_result.outputs
         circuit_ir = sig_res["circuit_ir"]
         signature = sig_res["signature"]
@@ -139,9 +141,9 @@ class NoOptBaselineStrategy(Strategy):
         if manifest is not None:
             manifest.environment.setdefault("strategy_name", self.name)
             manifest.environment.setdefault("strategy_version", self.version)
-            spec_payload = _spec_to_dict(spec)
-            param_payload = _param_space_to_dict(param_space)
-            cfg_payload = _strategy_cfg_to_dict(cfg, guard_cfg)
+            spec_payload = spec_to_dict(spec)
+            param_payload = param_space_to_dict(param_space)
+            cfg_payload = strategy_cfg_to_dict(cfg, guard_cfg)
             manifest.inputs.update(
                 {
                     "netlist_sha256": stable_hash_str(source.text),
@@ -188,11 +190,11 @@ class NoOptBaselineStrategy(Strategy):
                     {"circuit_source": source, "sim_plan": plan, "sim_kind": kind},
                     ctx=None,
                 )
-                _record_operator_result(recorder, deck_res)
+                record_operator_result(recorder, deck_res)
                 deck = deck_res.outputs["deck"]
                 stage_name = f"{kind.value}_i000_a00"
                 run_res = self.sim_run_op.run({"deck": deck, "stage": stage_name}, ctx)
-                _record_operator_result(recorder, run_res)
+                record_operator_result(recorder, run_res)
                 if manifest is not None:
                     version = run_res.provenance.notes.get("ngspice_version")
                     path = run_res.provenance.notes.get("ngspice_path")
@@ -202,7 +204,7 @@ class NoOptBaselineStrategy(Strategy):
                         manifest.environment.setdefault("ngspice_path", path)
                 raw = run_res.outputs["raw_data"]
                 metrics_res = self.metrics_op.run({"raw_data": raw, "metric_names": names}, ctx=None)
-                _record_operator_result(recorder, metrics_res)
+                record_operator_result(recorder, metrics_res)
                 bundles.append(metrics_res.outputs["metrics"])
                 stage_map[kind.value] = str(raw.run_dir)
                 warnings.extend(deck_res.warnings)
@@ -220,9 +222,9 @@ class NoOptBaselineStrategy(Strategy):
                 data={"error_type": type(exc).__name__},
             )
             guard_res = self.guard_chain_op.run({"checks": [check]}, ctx=None)
-            _record_operator_result(recorder, guard_res)
+            record_operator_result(recorder, guard_res)
             guard_report = guard_res.outputs["report"]
-            errors = _guard_failures(guard_report)
+            errors = guard_failures(guard_report)
 
         metrics = _merge_metrics(bundles) if bundles else MetricsBundle()
         if guard_report is None:
@@ -230,12 +232,12 @@ class NoOptBaselineStrategy(Strategy):
                 {"metrics": metrics, "spec": spec, "stage_map": stage_map, "guard_cfg": guard_cfg},
                 ctx=None,
             )
-            _record_operator_result(recorder, behavior_res)
+            record_operator_result(recorder, behavior_res)
             behavior_check = behavior_res.outputs["check"]
             guard_res = self.guard_chain_op.run({"checks": [behavior_check]}, ctx=None)
-            _record_operator_result(recorder, guard_res)
+            record_operator_result(recorder, guard_res)
             guard_report = guard_res.outputs["report"]
-            errors = _guard_failures(guard_report)
+            errors = guard_failures(guard_report)
 
         eval0 = evaluate_objectives(spec, metrics)
         history.append(
@@ -252,13 +254,13 @@ class NoOptBaselineStrategy(Strategy):
                 "sim_stages": stage_map,
                 "warnings": warnings,
                 "errors": errors,
-                "guard": _guard_report_to_dict(guard_report) if guard_report else None,
-                "attempts": [_attempt_record(0, None, guard_report, stage_map, warnings)],
+                "guard": guard_report_to_dict(guard_report) if guard_report else None,
+                "attempts": [attempt_record(0, None, guard_report, stage_map, warnings)],
             }
         )
-        _record_history_entry(recorder, history[-1])
+        record_history_entry(recorder, history[-1])
 
-        recording_errors = _finalize_run(
+        recording_errors = finalize_run(
             recorder=recorder,
             manifest=manifest,
             best_source=source,
@@ -270,7 +272,7 @@ class NoOptBaselineStrategy(Strategy):
             sim_runs=sim_runs,
             sim_runs_ok=sim_runs_ok,
             sim_runs_failed=sim_runs_failed,
-            best_metrics_payload=canonicalize_metrics(_metrics_to_dict(metrics)),
+            best_metrics_payload=canonicalize_metrics(metrics_to_dict(metrics)),
         )
 
         return RunResult(

@@ -57,7 +57,7 @@ Step 4 completion requires tightening a few gaps so the contract is unambiguous.
 
 2. **Integration test for end-to-end loop skeleton (minimal)**
    - Status: ✅ provided via examples + integration test.
-   - How to verify: `python examples/run_ac_once.py` (requires ngspice); `pytest -q -m integration`
+   - How to verify: `PYTHONPATH=src python examples/run_ac_once.py` (requires ngspice); `pytest -q -m integration`
 
 3. **Golden fixture for parsing and patching**
    - Status: ✅ fixtures exist (examples netlists + tests CSV fixtures); inline netlists in patch tests cover parsing/apply.
@@ -113,7 +113,7 @@ Metrics (fixture-based):
 - `pytest -q tests/test_metrics_algorithms.py`
 
 End-to-end smoke (requires ngspice):
-- `python examples/run_ac_once.py`
+- `PYTHONPATH=src python examples/run_ac_once.py`
 - `pytest -q -m integration`
 
 ## 90.4 Acceptance criteria

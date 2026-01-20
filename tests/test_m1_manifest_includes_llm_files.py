@@ -4,7 +4,7 @@ from eesizer_core.contracts import MetricsBundle
 from eesizer_core.contracts.enums import StopReason
 from eesizer_core.contracts.provenance import RunManifest
 from eesizer_core.runtime.recorder import RunRecorder
-from eesizer_core.strategies.patch_loop import _finalize_run
+from eesizer_core.runtime.recording_utils import finalize_run
 
 
 def test_manifest_includes_llm_files(tmp_path):
@@ -14,7 +14,7 @@ def test_manifest_includes_llm_files(tmp_path):
     llm_path.write_text("prompt", encoding="utf-8")
 
     manifest = RunManifest(run_id="test", workspace=tmp_path)
-    _finalize_run(
+    finalize_run(
         recorder=recorder,
         manifest=manifest,
         best_source=None,

@@ -68,7 +68,7 @@ Fields:
 - `timestamp_start: str | None`
 - `timestamp_end: str | None`
 - `inputs: dict[str, Any]` (hashes + signature)
-- `environment: dict[str, Any]` (python/platform/tool/policy metadata)
+- `environment: dict[str, Any]` (python/platform/tool/policy metadata; SHOULD include a dependency version snapshot)
 - `files: dict[str, str]` (relative paths under run_dir)
 - `result_summary: dict[str, Any]` (best iter/score, stop reason, sim runs)
 - `result_summary: dict[str, Any]` (best iter/score, stop reason, sim runs total/ok/failed)

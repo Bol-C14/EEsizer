@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Mapping
 
 from ..contracts.artifacts import CircuitSource
@@ -27,6 +28,22 @@ class CircuitSourceToNetlistBundleOperator(Operator):
         base_dir = md.get("base_dir") or "."
         include_files = md.get("include_files") or ()
         extra_search_paths = md.get("extra_search_paths") or ()
+
+        if not isinstance(base_dir, (str, Path)):
+            raise ValidationError("base_dir must be a string or Path if provided")
+        if not isinstance(include_files, (list, tuple)):
+            raise ValidationError("include_files must be a list/tuple of paths if provided")
+        if not isinstance(extra_search_paths, (list, tuple)):
+            raise ValidationError("extra_search_paths must be a list/tuple of paths if provided")
+
+        include_files = tuple(include_files)
+        extra_search_paths = tuple(extra_search_paths)
+        for path in include_files:
+            if not isinstance(path, (str, Path)):
+                raise ValidationError("include_files entries must be strings or Paths")
+        for path in extra_search_paths:
+            if not isinstance(path, (str, Path)):
+                raise ValidationError("extra_search_paths entries must be strings or Paths")
 
         bundle = NetlistBundle(
             text=src.text,
