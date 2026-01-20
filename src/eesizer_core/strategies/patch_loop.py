@@ -547,6 +547,17 @@ class PatchLoopStrategy(Strategy):
         sig_res = sig_result.outputs
         circuit_ir = sig_res["circuit_ir"]
         signature = sig_res["signature"]
+        signature_result = sig_res.get("signature_result")
+        raw_source = source
+        if signature_result is not None:
+            sanitized_text = signature_result.sanitize_result.sanitized_text
+            if sanitized_text != raw_source.text:
+                source = CircuitSource(
+                    kind=raw_source.kind,
+                    text=sanitized_text,
+                    name=raw_source.name,
+                    metadata=dict(raw_source.metadata),
+                )
 
         # Step 2: ParamSpace
         rules = ParamInferenceRules(**cfg.notes.get("param_rules", {}))
@@ -649,7 +660,7 @@ class PatchLoopStrategy(Strategy):
                 )
                 sim_runs += sim_runs_delta
                 sim_runs_ok += sim_runs_delta
-            except (SimulationError, MetricError) as exc:
+            except (SimulationError, MetricError, ValidationError) as exc:
                 sim_runs += 1
                 sim_runs_failed += 1
                 check = GuardCheck(
