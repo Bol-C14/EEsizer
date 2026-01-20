@@ -161,6 +161,13 @@ From repository root:
 pip install -e ".[dev]"
 ```
 
+For a fully pinned environment, use the lock files:
+
+```bash
+pip install -r requirements-dev.lock
+pip install -e .
+```
+
 ### 4) Run tests
 
 ```bash

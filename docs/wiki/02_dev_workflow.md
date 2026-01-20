@@ -28,6 +28,15 @@ pip install -U pip
 pip install -e ".[dev]"
 ```
 
+Pinned installs (recommended for reproducibility):
+```bash
+pip install -r requirements-dev.lock
+pip install -e .
+```
+
+Extra lock files are available for optional features:
+`requirements.lock`, `requirements-llm.lock`, `requirements-viz.lock`, `requirements-opt.lock`.
+
 ## Environment variables
 Typical variables for LLM-backed policies:
 - `OPENAI_API_KEY`
