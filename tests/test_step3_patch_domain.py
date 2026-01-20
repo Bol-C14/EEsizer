@@ -77,6 +77,16 @@ def test_apply_patch_on_passive_main_value():
     assert "2e+03" in text or "2000" in text or "2e3" in text
 
 
+def test_apply_patch_inline_comment_attached():
+    netlist = "R1 in out 1k;comment\n"
+    cir = topology_signature(netlist).circuit_ir
+    patch = Patch(ops=(PatchOp(param="R1.value", op=PatchOpType.mul, value=2),))
+    cir2 = apply_patch_with_topology_guard(cir, patch)
+    text = "\n".join(cir2.lines)
+    assert ";comment" in text
+    assert "2e+03" in text or "2000" in text or "2000.0" in text or "2e3" in text
+
+
 def test_apply_patch_on_param_line():
     netlist = ".param W0=1u\n"
     cir = topology_signature(netlist).circuit_ir

@@ -6,6 +6,9 @@ import re
 
 def tokenize_spice_line(line: str) -> Tuple[List[str], List[Tuple[int, int]]]:
     """Tokenize a SPICE line, returning tokens and their (start, end) spans."""
+    comment_idx = line.find(";")
+    if comment_idx != -1:
+        line = line[:comment_idx]
     tokens: List[str] = []
     spans: List[Tuple[int, int]] = []
     for m in re.finditer(r"\S+", line):
