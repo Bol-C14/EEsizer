@@ -1,8 +1,9 @@
 # LLMPatchPolicy
 
-LLMPatchPolicy turns an `Observation` into a structured Patch JSON using an LLM backend.
+LLMPatchPolicy formats prompts and parses Patch JSON while keeping policy logic pure.
 It never emits a full netlist and only returns patch operations.
-LLM calls are delegated to the `LLMCallOperator` for provenance and audit artifacts.
+LLM calls and retries are handled by the strategy via `LLMCallOperator` for provenance and audit artifacts.
+The policy exposes `build_request()` and `parse_response()` helpers for the strategy to use.
 
 ## Inputs it expects
 
@@ -14,7 +15,7 @@ The policy reads from `Observation.notes`:
 - `last_guard_report` or `last_guard_failures`: optional guard feedback for rejection/blacklist hints.
 - `attempt`: retry index inside the current iteration (added by PatchLoopStrategy).
 
-If `param_values` or `current_score` is missing, the policy returns `Patch(stop=True)`.
+If `param_values` or `current_score` is missing, the policy returns a stop reason to the strategy.
 
 The prompt clarifies that score is a penalty to minimize and that `score=0.0` means all objectives are satisfied.
 
@@ -38,7 +39,7 @@ Unknown fields are rejected. Parameters must be in the non-frozen `ParamSpace`.
 
 If the response does not parse:
 
-1. The policy retries up to `max_retries` times.
+1. The strategy retries up to `max_retries` times.
 2. Each retry appends the parse error to the prompt and re-requests JSON only.
 3. If still failing, it returns `Patch(stop=True, notes="llm_parse_failed")`.
 

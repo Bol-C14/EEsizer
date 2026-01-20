@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional
+import json
 
 from ..contracts import (
     CircuitSource,
@@ -31,6 +32,7 @@ from ..operators.guards import (
     BehaviorGuardOperator,
     GuardChainOperator,
 )
+from ..operators.llm import LLMCallOperator
 from ..sim import DeckBuildOperator, NgspiceRunOperator
 from ..strategies.objective_eval import evaluate_objectives
 from ..domain.spice.params import ParamInferenceRules, infer_param_space_from_ir
@@ -47,6 +49,84 @@ def _patch_to_dict(patch: Patch) -> dict[str, Any]:
         "stop": patch.stop,
         "notes": patch.notes,
     }
+
+
+def _llm_patch_payload(patch: Patch) -> dict[str, Any]:
+    return {
+        "patch": [
+            {"param": op.param, "op": getattr(op.op, "value", op.op), "value": op.value, "why": getattr(op, "why", "")}
+            for op in patch.ops
+        ],
+        "stop": patch.stop,
+        "notes": patch.notes,
+    }
+
+
+def _llm_stage_name(obs: Observation, retry_idx: int) -> str:
+    attempt = obs.notes.get("attempt", 0)
+    base = f"llm/llm_i{obs.iteration:03d}_a{attempt:02d}"
+    if retry_idx > 0:
+        return f"{base}_r{retry_idx:02d}"
+    return base
+
+
+def _write_llm_artifact(ctx: Any, stage: str, filename: str, payload: str) -> None:
+    if ctx is None or not hasattr(ctx, "run_dir"):
+        return
+    stage_dir = Path(ctx.run_dir()) / stage
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    (stage_dir / filename).write_text(payload, encoding="utf-8")
+
+
+def _is_llm_policy(policy: Any) -> bool:
+    return hasattr(policy, "build_request") and hasattr(policy, "parse_response")
+
+
+def _propose_llm_patch(
+    policy: Any,
+    llm_call_op: Any,
+    obs: Observation,
+    ctx: Any,
+) -> Patch:
+    last_error: Optional[str] = None
+    max_retries = int(getattr(policy, "max_retries", 0))
+
+    for retry in range(max_retries + 1):
+        request_payload, stop_reason = policy.build_request(obs, last_error=last_error)
+        if stop_reason:
+            return Patch(stop=True, notes=stop_reason)
+        if not isinstance(request_payload, dict):
+            return Patch(stop=True, notes="llm_request_missing")
+
+        stage = _llm_stage_name(obs, retry)
+        inputs = {"request": request_payload, "stage": stage}
+        provider = request_payload.get("config", {}).get("provider", getattr(policy, "provider", None))
+        if provider == "mock" and hasattr(policy, "mock_response"):
+            prompt = request_payload.get("user", "")
+            inputs["mock_response"] = policy.mock_response(prompt, obs)
+        try:
+            llm_result = llm_call_op.run(inputs, ctx)
+        except Exception as exc:
+            _write_llm_artifact(ctx, stage, "call_error.txt", str(exc))
+            return Patch(stop=True, notes="llm_call_failed")
+
+        response_text = llm_result.outputs.get("response_text", "")
+        try:
+            patch = policy.parse_response(response_text, obs)
+        except Exception as exc:
+            last_error = str(exc)
+            _write_llm_artifact(ctx, stage, "parse_error.txt", last_error)
+            continue
+
+        _write_llm_artifact(
+            ctx,
+            stage,
+            "parsed_patch.json",
+            json.dumps(_llm_patch_payload(patch), indent=2, sort_keys=True),
+        )
+        return patch
+
+    return Patch(stop=True, notes="llm_parse_failed")
 
 
 def _group_metric_names_by_kind(registry: MetricRegistry, metric_names: Iterable[str]) -> dict[SimKind, list[str]]:
@@ -361,6 +441,7 @@ class PatchLoopStrategy(Strategy):
     deck_build_op: Any = None
     sim_run_op: Any = None
     metrics_op: Any = None
+    llm_call_op: Any = None
     registry: MetricRegistry | None = None
     policy: Policy | None = None
     measure_fn: Optional[MeasureFn] = None
@@ -385,6 +466,8 @@ class PatchLoopStrategy(Strategy):
             self.sim_run_op = NgspiceRunOperator()
         if self.metrics_op is None:
             self.metrics_op = ComputeMetricsOperator()
+        if self.llm_call_op is None:
+            self.llm_call_op = LLMCallOperator()
         if self.registry is None:
             self.registry = DEFAULT_REGISTRY
 
@@ -484,6 +567,22 @@ class PatchLoopStrategy(Strategy):
             manifest.environment.setdefault("policy_version", getattr(self.policy, "version", "unknown"))
             manifest.environment.setdefault("strategy_name", self.name)
             manifest.environment.setdefault("strategy_version", self.version)
+            if hasattr(self.policy, "provider"):
+                manifest.environment.setdefault("llm_provider", getattr(self.policy, "provider"))
+            if hasattr(self.policy, "model"):
+                manifest.environment.setdefault("llm_model", getattr(self.policy, "model"))
+            if hasattr(self.policy, "temperature"):
+                manifest.environment.setdefault("llm_temperature", getattr(self.policy, "temperature"))
+            if hasattr(self.policy, "max_tokens"):
+                max_tokens = getattr(self.policy, "max_tokens")
+                if max_tokens is not None:
+                    manifest.environment.setdefault("llm_max_tokens", max_tokens)
+            if hasattr(self.policy, "seed"):
+                seed = getattr(self.policy, "seed")
+                if seed is not None:
+                    manifest.environment.setdefault("llm_seed", seed)
+            if hasattr(self.policy, "response_schema_name"):
+                manifest.environment.setdefault("llm_response_schema", getattr(self.policy, "response_schema_name"))
             spec_payload = _spec_to_dict(spec)
             param_payload = _param_space_to_dict(param_space)
             cfg_payload = _strategy_cfg_to_dict(cfg, guard_cfg)
@@ -758,7 +857,10 @@ class PatchLoopStrategy(Strategy):
                     notes=obs_notes,
                 )
 
-                patch = self.policy.propose(obs, ctx)
+                if _is_llm_policy(self.policy):
+                    patch = _propose_llm_patch(self.policy, self.llm_call_op, obs, ctx)
+                else:
+                    patch = self.policy.propose(obs, ctx)
                 if patch.stop:
                     stop_reason = StopReason.policy_stop
                     attempts.append(_attempt_record(attempt, patch, None))

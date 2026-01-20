@@ -30,6 +30,9 @@ Observation is a dataclass (`eesizer_core.contracts.policy.Observation`) and SHO
 
 Policies SHOULD NOT require direct file access.
 
+For LLM-backed policies, strategies MAY call helper methods (for example `build_request` and
+`parse_response`) to keep tool invocation inside strategy/operator layers.
+
 ### Reference policies in repo
 - `FixedSequencePolicy`: emits a fixed list of patches then returns `Patch(stop=True, notes="sequence_exhausted")`.
 - `RandomNudgePolicy`: picks a non-frozen param and applies a small multiplicative nudge; stops if none available.
