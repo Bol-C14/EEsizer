@@ -1,5 +1,6 @@
-
 # EEsizer (Bol-C14/EEsizer)
+
+LLM-based AI Agent for Sizing of Analog and Mixed Signal Circuit
 
 EEsizer is a **modular, operator-driven framework** for analog / mixed-signal circuit processing and optimization, designed to support:
 
@@ -176,6 +177,11 @@ PYTHONPATH=src pytest -q
 
 > If you see `ModuleNotFoundError: eesizer_core`, it means the package is not installed in editable mode.
 > Fix: `pip install -e ".[dev]"` and rerun `pytest`.
+
+Example results (legacy reference):
+![Optimization results for the opamp.](/legacy/figures/rail-to-rail-process.png)
+![Variation results.](/legacy/figures/monte-carlo-10var.png)
+![Performance comparison of different LLMs](/legacy/figures/performance-new.png)
 
 ---
 
@@ -430,3 +436,7 @@ If you need includes, use controlled relative paths and avoid `..` and absolute 
 * Repository: Bol-C14/EEsizer
 
 ---
+
+## Acknowledgements
+
+This work was made possible by Peter Denyer's PhD Scholarship at The University of Edinburgh.
