@@ -46,9 +46,16 @@ runs/<run_id>/
   best/
     best.sp
     best_metrics.json
+  search/
+    candidates.json
+    topk.json
+    pareto.json
+  report.md
 ```
 
 All paths referenced in manifest/history SHOULD be relative to the run directory.
+
+Grid search strategies SHOULD populate `search/` and `report.md` and register these files in the run manifest.
 
 ### JSONL schemas (minimal)
 

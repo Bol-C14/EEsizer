@@ -4,6 +4,10 @@ import types
 import unittest
 from unittest.mock import patch
 
+import pytest
+
+pytest.importorskip("openai")
+
 from agent_test_gpt import llm_client
 
 

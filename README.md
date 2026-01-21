@@ -260,6 +260,21 @@ Notes:
 
 ---
 
+## Usage: Grid search (Milestone 2)
+
+Deterministic coordinate grid search on the RC demo:
+
+```bash
+PYTHONPATH=src python examples/run_grid_search_rc.py --max-iters 21 --levels 10 --span-mul 10 --scale log --mode coordinate
+```
+
+Notes:
+* Requires `ngspice` on PATH.
+* Run artifacts include `search/` outputs and `report.md` under `examples/output/runs/<run_id>/`.
+* For other circuits, pass `--netlist` and update the spec in the script.
+
+---
+
 ## Step 3 Recap: Patch Substrate (Parameter-only Editing)
 
 ### Motivation

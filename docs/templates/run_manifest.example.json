@@ -40,7 +40,11 @@
       "llm/llm_i001_a00/parsed_patch.json"
     ],
     "best/best.sp": "best/best.sp",
-    "best/best_metrics.json": "best/best_metrics.json"
+    "best/best_metrics.json": "best/best_metrics.json",
+    "search/candidates.json": "search/candidates.json",
+    "search/topk.json": "search/topk.json",
+    "search/pareto.json": "search/pareto.json",
+    "report.md": "report.md"
   },
   "result_summary": {
     "stop_reason": "reached_target",
