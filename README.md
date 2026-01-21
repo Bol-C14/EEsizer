@@ -238,6 +238,22 @@ This builds an AC deck for `examples/rc_lowpass.sp`, runs ngspice into `examples
 
 ---
 
+## Usage: Patch loop with LLMPatchPolicy (Milestone 1)
+
+Minimal closed-loop demo (RC lowpass, mock provider by default):
+
+```bash
+PYTHONPATH=src python examples/run_patch_loop_llm.py --provider mock
+```
+
+Notes:
+* Requires `ngspice` on PATH.
+* For OpenAI, set `OPENAI_API_KEY` and use `--provider openai`.
+* Run artifacts include `llm/` prompt/response files under `examples/output/runs/<run_id>/`.
+* For other circuits, pass `--netlist` and update the spec in the script.
+
+---
+
 ## Step 3 Recap: Patch Substrate (Parameter-only Editing)
 
 ### Motivation

@@ -1,6 +1,7 @@
 # LLMPatchPolicy
 
-LLMPatchPolicy formats prompts and parses Patch JSON while keeping policy logic pure.
+LLMPatchPolicy (sometimes referred to as JsonPatchLLMPolicy) formats prompts and parses Patch JSON while keeping
+policy logic pure.
 It never emits a full netlist and only returns patch operations.
 LLM calls and retries are handled by the strategy via `LLMCallOperator` for provenance and audit artifacts.
 The policy exposes `build_request()` and `parse_response()` helpers for the strategy to use.
@@ -12,12 +13,17 @@ The policy reads from `Observation.notes`:
 - `current_score`: numeric score for the current candidate.
 - `best_score`: best score so far.
 - `param_values`: `{param_id: value}` snapshot of current parameter values.
-- `last_guard_report` or `last_guard_failures`: optional guard feedback for rejection/blacklist hints.
+- `last_guard_report` or `last_guard_failures`: guard feedback supplied by the strategy after failed attempts.
 - `attempt`: retry index inside the current iteration (added by PatchLoopStrategy).
 
 If `param_values` or `current_score` is missing, the policy returns a stop reason to the strategy.
 
 The prompt clarifies that score is a penalty to minimize and that `score=0.0` means all objectives are satisfied.
+
+## Guard feedback loop
+
+PatchLoopStrategy injects the most recent guard report/failures into `Observation.notes`. The policy includes this
+in the prompt so the LLM can avoid repeating invalid or unsafe patches.
 
 ## Output contract
 
@@ -58,6 +64,12 @@ runs/<run_id>/llm/llm_i{iter}_a{attempt}/
 ```
 
 Retries append `_rXX` to the stage directory name.
+
+## Demo usage
+
+The minimal closed-loop demo uses `examples/run_patch_loop_llm.py` with the RC lowpass netlist. It defaults to
+`provider=mock` so it can run without API access, and requires `ngspice` on PATH. For other circuits (e.g., OTA),
+swap the netlist and update the spec definition in the script.
 
 ## Mock backend behavior
 

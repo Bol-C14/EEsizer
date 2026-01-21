@@ -71,6 +71,20 @@ Outputs to expect:
 - `runs/<run_id>/ac_example/ngspice_ac.log`
 - Printed metric values
 
+## Running the LLM patch-loop demo (Milestone 1)
+
+The minimal closed-loop LLM demo uses the RC lowpass netlist and mock LLM provider:
+
+```bash
+PYTHONPATH=src python examples/run_patch_loop_llm.py --provider mock
+```
+
+Notes:
+- Requires `ngspice` on PATH.
+- For OpenAI, set `OPENAI_API_KEY` and use `--provider openai`.
+- Run artifacts are written under `examples/output/runs/<run_id>/` and include `llm/` prompt/response files.
+- For other circuits (e.g., OTA), pass `--netlist` and update the spec in the script.
+
 ## Future CLI target (not yet implemented)
 Planned `eesizer_cli` flow (design target, not present in repo yet):
 ```bash

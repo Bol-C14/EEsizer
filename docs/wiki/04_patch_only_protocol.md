@@ -65,3 +65,7 @@ These are guardrails, not formal equivalence proofs.
 ## LLM prompt rules (if using an LLM policy)
 - Output must be Patch JSON only (enforced by schema validation).
 - Never ask the LLM to print a modified netlist.
+
+## LLM audit loop (recommended)
+- Strategies should persist prompt/response artifacts under the run directory for auditability.
+- Guard failures should be fed back to the policy via `Observation.notes` to avoid repeated invalid patches.
