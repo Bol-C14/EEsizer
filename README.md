@@ -421,22 +421,17 @@ If you need includes, use controlled relative paths and avoid `..` and absolute 
 
   * one invariant / one operator / one test suite at a time
 
----
 
-## License / Citation
-
-* License: (add your license here)
-* Citation: (optional, add paper/project citation)
 
 ---
 
 ## Contact / Maintainers
 
-* Maintained by the Bol-C14 research workflow team.
+* New structure developed and maintained by the PhD Researcher Shu Gu from University of Edinburgh
 * Repository: Bol-C14/EEsizer
 
 ---
 
 ## Acknowledgements
 
-This work was made possible by Peter Denyer's PhD Scholarship at The University of Edinburgh.
+This work originally was made possible by Peter Denyer's PhD Scholarship at The University of Edinburgh.
