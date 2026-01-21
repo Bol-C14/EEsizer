@@ -37,11 +37,7 @@ from ..runtime.recording_utils import (
 )
 from ..sim import DeckBuildOperator, NgspiceRunOperator
 from .objective_eval import evaluate_objectives
-from .patch_loop import (
-    _group_metric_names_by_kind,
-    _merge_metrics,
-    _sim_plan_for_kind,
-)
+from .patch_loop.planning import group_metric_names_by_kind, merge_metrics, sim_plan_for_kind
 
 
 def _extract_sim_plan(notes: Mapping[str, Any]) -> SimPlan | None:
@@ -171,7 +167,7 @@ class NoOptBaselineStrategy(Strategy):
                 recorder.write_input("signature.txt", signature)
 
         metric_names = [obj.metric for obj in spec.objectives]
-        metric_groups = _group_metric_names_by_kind(self.registry, metric_names)
+        metric_groups = group_metric_names_by_kind(self.registry, metric_names)
         sim_plan = _extract_sim_plan(spec.notes) or _extract_sim_plan(cfg.notes)
 
         bundles: list[MetricsBundle] = []
@@ -185,7 +181,7 @@ class NoOptBaselineStrategy(Strategy):
 
         try:
             for kind, names in metric_groups.items():
-                plan = sim_plan if sim_plan is not None else _sim_plan_for_kind(kind)
+                plan = sim_plan if sim_plan is not None else sim_plan_for_kind(kind)
                 deck_res = self.deck_build_op.run(
                     {"circuit_source": source, "sim_plan": plan, "sim_kind": kind},
                     ctx=None,
@@ -226,7 +222,7 @@ class NoOptBaselineStrategy(Strategy):
             guard_report = guard_res.outputs["report"]
             errors = guard_failures(guard_report)
 
-        metrics = _merge_metrics(bundles) if bundles else MetricsBundle()
+        metrics = merge_metrics(bundles) if bundles else MetricsBundle()
         if guard_report is None:
             behavior_res = self.behavior_guard_op.run(
                 {"metrics": metrics, "spec": spec, "stage_map": stage_map, "guard_cfg": guard_cfg},

@@ -62,6 +62,12 @@ class RunContext:
             )
         return self._manifest
 
+    def recorder(self) -> RunRecorder:
+        """Return a RunRecorder bound to this run's directory."""
+        if self._recorder is None:
+            self._recorder = RunRecorder(self.run_dir())
+        return self._recorder
+
 
 def _dependency_snapshot() -> list[str]:
     """Collect a best-effort dependency snapshot for reproducibility."""
@@ -85,9 +91,3 @@ def _dependency_snapshot() -> list[str]:
             continue
         entries.append(f"{name}=={version}")
     return sorted(set(entries), key=str.lower)
-
-    def recorder(self) -> RunRecorder:
-        """Return a RunRecorder bound to this run's directory."""
-        if self._recorder is None:
-            self._recorder = RunRecorder(self.run_dir())
-        return self._recorder
