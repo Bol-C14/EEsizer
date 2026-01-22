@@ -8,7 +8,12 @@ import pytest
 
 pytest.importorskip("openai")
 
-from agent_test_gpt import llm_client
+from eesizer_core.baselines.legacy_metrics_adapter import ensure_legacy_importable
+
+if not ensure_legacy_importable():
+    pytest.skip("legacy_eesizer not available", allow_module_level=True)
+
+from legacy_eesizer import llm_client
 
 
 class FakeCompletions:
@@ -50,7 +55,7 @@ class TestLLMClientStreaming(unittest.TestCase):
         ]
         FakeOpenAI.response = chunks
 
-        with patch("agent_test_gpt.llm_client.OpenAI", FakeOpenAI):
+        with patch("legacy_eesizer.llm_client.OpenAI", FakeOpenAI):
             with contextlib.redirect_stdout(io.StringIO()):
                 result = llm_client.make_chat_completion_request("Hi")
 
@@ -68,7 +73,7 @@ class TestLLMClientFunctionCalling(unittest.TestCase):
         sentinel = {"ok": True}
         FakeOpenAI.response = sentinel
 
-        with patch("agent_test_gpt.llm_client.OpenAI", FakeOpenAI):
+        with patch("legacy_eesizer.llm_client.OpenAI", FakeOpenAI):
             with contextlib.redirect_stdout(io.StringIO()):
                 result = llm_client.make_chat_completion_request_function("Run tools")
 

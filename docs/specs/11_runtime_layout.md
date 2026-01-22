@@ -47,6 +47,7 @@ runs/<run_id>/
     best.sp
     best_metrics.json
   search/
+    corner_set.json
     candidates.json
     topk.json
     pareto.json
@@ -56,11 +57,14 @@ runs/<run_id>/
 All paths referenced in manifest/history SHOULD be relative to the run directory.
 
 Grid search strategies SHOULD populate `search/` and `report.md` and register these files in the run manifest.
+Corner search strategies SHOULD add `search/corner_set.json`, populate `search/topk.json` and `search/pareto.json`, and include per-corner
+results in `history/iterations.jsonl`.
 
 ### JSONL schemas (minimal)
 
 `history/iterations.jsonl` lines SHOULD include:
 - `iteration`, `patch`, `metrics`, `score`, `sim_stages`, `guard`, `attempts`
+- `corners` (corner search: list of per-corner metrics/score entries)
 
 `provenance/operator_calls.jsonl` lines SHOULD include:
 - `operator`, `version`, `start_time`, `end_time`, `inputs`, `outputs`, `command`, `notes`
