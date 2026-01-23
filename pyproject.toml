@@ -27,6 +27,9 @@ opt = ["scipy>=1.11"]
 package-dir = { "" = "src" }
 include-package-data = true
 
+[tool.setuptools.exclude-package-data]
+"*" = ["__pycache__", "*.pyc", "*.pyo", "*.pyd", "*.so", "*.dylib", "*.dll", ".DS_Store", "Thumbs.db"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["eesizer_core*"]

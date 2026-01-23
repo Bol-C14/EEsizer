@@ -9,7 +9,7 @@
 ## Files touched
 
 - `src/eesizer_core/policies/llm_patch.py`
-- `src/eesizer_core/strategies/patch_loop.py`
+- `src/eesizer_core/strategies/patch_loop/strategy.py`
 - `docs/policies/llm_patch.md`
 - `docs/specs/41_policy_strategy_contracts.md`
 - `tests/test_m1_llm_patch_policy_retry.py`

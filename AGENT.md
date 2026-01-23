@@ -1,38 +1,32 @@
+# AGENT.md — Development Rules for EEsizer (LLM + Humans)
 
-# AGENT.md — Unified Circuit Processor Dev Rules for LLMs 🤖
+This file tells you (human contributors and LLM-based dev assistants) how to work in this repo without breaking:
 
-This file tells you, the LLM-based dev assistant, **how to work in this repo without turning it into spaghetti**.
+- **Safety** (policies cannot silently rewrite circuits)
+- **Auditability** (we can prove what happened)
+- **Reproducibility** (runs can be reconstructed)
+- **Layering** (no “quick fix” cross-layer spaghetti)
+- **Extensibility** (new tools/strategies can plug in cleanly)
 
-You are not just writing code.  
-You are maintaining a **research platform** that must stay:
-
-- **Unified** (one abstraction, shared across tasks)
-- **Auditable** (we can prove what happened)
-- **Safe** (LLMs don’t silently rewrite circuits)
-- **Extensible** (non-LLM ML / new tools can plug in later)
-- **Documented** (docs/ is a first-class citizen, not an afterthought)
-
-Treat everything below as **golden rules**.
+Treat the rules below as **non-negotiable** unless an ADR explicitly changes them.
 
 ---
 
 ## 0. Absolute boundaries
 
-1. **Never modify `legacy/`**  
-   - It is **read-only** reference code.
-   - You may read it to understand behavior, but new work must go under `src/` and `docs/`.
+1) **Never modify `legacy/`**  
+   It is read-only reference code. New work goes under `src/` and `docs/`.
 
-2. **Never bypass the abstraction layers**  
-   - Do not make “quick fixes” by wiring tools directly into strategies or policies.
-   - Always route new behavior through the appropriate layer (Artifact / Domain / Operator / Policy / Strategy).
+2) **Never bypass abstraction layers**  
+   Do not wire tools directly into policies or domain logic. Use the correct layer.
 
-3. **Never write heavy logic into `contracts/`**  
-   - `contracts/` defines **types and protocols**, not business logic.
-   - No file I/O, no shell commands, no parsing, no tool invocation there.
+3) **Never put business logic into `contracts/`**  
+   `contracts/` defines types and protocols only.  
+   No file I/O, no parsing, no subprocess, no network.
 
-4. **Never let an LLM generate full netlists as “ground truth”**  
-   - LLMs can propose **parameter patches**, not rewrite entire circuits.
-   - All structural modifications must go through **Patch + IR + Guards**.
+4) **Never let a policy generate a full netlist as ground truth**  
+   Policies may propose **parameter-only patches** (or structured plans).  
+   All circuit modification must go through **Patch + IR + Guards**.
 
 ---
 
@@ -42,335 +36,257 @@ The codebase is organized as:
 
 - `contracts/`  
   Pure definitions:
-  - Artifacts (`CircuitSource`, `CircuitIR`, `ParamSpace`, `Patch`, `SimPlan`, `MetricSpec`, `RunResult`…)
-  - Protocols (`Operator`, `Policy`, `Strategy`)
-  - Infrastructure definitions (`Provenance`, `Errors`, `Enums`)
+  - artifacts (`CircuitSource`, `CircuitIR`, `ParamSpace`, `Patch`, `SimPlan`, manifests, summaries…)
+  - protocols (`Operator`, `Policy`, `Strategy`)
+  - errors, enums, provenance types
 
 - `domain/`  
   Pure domain logic (no side effects):
-  - SPICE parsing, tokenize, sanitation rules
-  - signature computation
-  - metric formulas (math only, no I/O)
-  - small helper algorithms
+  - SPICE sanitation rules and parsing
+  - tokenization and canonical forms
+  - topology signature computation
+  - metric formulas (math only)
 
 - `operators/`  
-  Tool-wrappers & stateful actions:
-  - Netlist sanitization, parsing, indexing (wrapping `domain.spice.*`)
-  - Simulation runners (ngspice, formal engines, etc.)
-  - Metric extraction (wrapping domain formulas, file-based inputs)
-  - Guards (topology invariants, constraint checks)
+  Tool wrappers and stateful actions:
+  - netlist operators (sanitize / index / signature / patch apply)
+  - simulation operators (deck build / ngspice run)
+  - metrics operators (extract / compute)
+  - guards (topology invariants, behavior constraints)
+  - **Operators own side effects** and emit provenance.
 
 - `policies/`  
-  Decision engines:
-  - LLM-based policies
-  - heuristic policies
-  - RL / BO / other decision models
-  - **They output `Patch` or structured plans; they do not run tools.**
+  Decision engines (pure logic):
+  - LLM policies, heuristics, or other models
+  - output `Patch` or structured plans
+  - **no tool execution, no file writes**
 
 - `strategies/`  
   Workflow orchestration:
-  - Optimization loops
-  - multi-step flows (map → optimize → verify → compare)
-  - They call **operators** and **policies**, enforce **guards**, and decide when to stop.
+  - optimization loops (PatchLoop)
+  - deterministic search (GridSearch)
+  - robustness evaluation (CornerSearch)
+  - multi-step orchestration (MultiAgentOrchestrator)
+  - Strategies call operators and policies, enforce guards, and decide stop reasons.
 
 - `runtime/`  
-  Execution context:
-  - `RunContext`, workspace paths, seeds, manifest writing
-  - Registry of operators/policies if needed
+  Execution context and run I/O:
+  - `RunContext`, recorder/writer, loaders
+  - `ArtifactStore` and plan execution utilities
+  - manifest writing and environment capture
 
 - `docs/`  
-  Human-facing and spec:
-  - `wiki/` high-level explanations for humans
-  - `specs/` precise contracts, JSON schemas, data format specs
-  - `design/` architecture decision records (ADR)
-  - `devlog/` periodic logs of changes
-  - `reports/` experimental results, comparisons, draft deliverables
+  Human-facing documentation:
+  - wiki, specs (schemas/formats), ADRs, devlogs, reports
 
 ---
 
-## 2. Dependency rules (you MUST respect these)
+## 2. Dependency rules (must respect)
 
-Think of dependencies as **one-way arrows**:
+Dependencies are one-way arrows:
 
-- `contracts` → nothing (only stdlib / typing)
-- `domain` → `contracts` (types), stdlib
+- `contracts` → stdlib only
+- `domain` → `contracts` (types) + stdlib
 - `operators` → `contracts`, `domain`, `runtime`
-- `policies` → `contracts` (and maybe `runtime` for logging), but **NOT** concrete operators
-- `strategies` → `contracts`, injected operator/policy instances, `runtime`
-- `docs` → describe all of the above; not imported into code
+- `policies` → `contracts` (and optionally lightweight runtime logging helpers), **not** concrete operators
+- `strategies` → `contracts`, `runtime`, and **injected** operators/policies
+- `docs` → describe, never imported into code
 
 Golden rule:
 
 > If you are about to write `import eesizer_core.X` from a lower layer into a higher layer, stop and re-evaluate. Lower layers must not depend on higher ones.
 
-Examples of violations (do NOT do this):
+Examples of violations:
 
-- `contracts/artifacts.py` importing `domain.spice.parse`
-- `domain/...` importing `runtime.context`
-- `policies/...` importing `operators.ngspice_run` to run tools directly
-- `operators/...` importing `strategies.sizing_loop`
-
----
-
-## 3. Artifact / Operator / Policy / Strategy: what goes where
-
-### 3.1 Artifacts
-
-Artifacts live in `contracts.artifacts` and are the **only way** state is passed between layers.
-
-Common ones:
-
-- `CircuitSource`: raw netlist/HDL/schematic text + metadata
-- `CircuitIR`: parsed, indexable representation (topology + param locations)
-- `ParamSpace`: whitelist of tunable parameters, with bounds and frozen flags
-- `Patch`: structured parameter updates (`PatchOp` list)
-- `SimPlan`: which sims to run (dc/ac/tran/ams, with parameters)
-- `MetricSpec` / `MetricValue` / `MetricsBundle`
-- `RunResult`: final result, best candidate, history, stop reason
-
-Rules:
-
-- Artifacts can have **small helper methods** (`fingerprint()`, trivial `validate()`), but no side effects.
-- Artifacts must be **serializable** and **hashable in content** (used in provenance).
-
-### 3.2 Domain functions
-
-Domain sets the **math and parsing rules**, without touching file paths or external tools.
-
-Examples:
-
-- `domain.spice.sanitize_text(raw_text) -> (clean_text, includes, warnings)`
-- `domain.spice.parse_ir(clean_text) -> CircuitIR`
-- `domain.spice.compute_topology_signature(circuit_ir) -> str`
-- `domain.metrics.compute_gain(...) -> float`
-
-Rules:
-
-- No file I/O.
-- No subprocess.
-- No environment access.
-- Only pure functions, given inputs, return outputs.
-
-### 3.3 Operators
-
-Operators adapt domain logic & tools to the runtime.
-
-Pattern:
-
-```python
-class SomeOperator(Operator):
-    name = "some_operator"
-    version = "0.1"
-
-    def run(self, inputs: Mapping[str, Any], ctx: RunContext) -> OperatorResult:
-        # read artifacts from inputs
-        # call domain functions OR external tools
-        # produce new artifacts
-        # record provenance
-        ...
-````
-
-Example responsibilities:
-
-* `SpiceSanitizeOperator`:
-
-  * In: `CircuitSource`
-  * Out: sanitized `CircuitSource` + includes + warnings
-  * Uses: `domain.spice.sanitize_text`
-* `SpiceIndexOperator`:
-
-  * In: sanitized `CircuitSource`
-  * Out: `CircuitIR` with `param_locs`
-  * Uses: `domain.spice.parse_ir`
-* `TopologySignatureOperator`:
-
-  * In: `CircuitIR`
-  * Out: `signature` string / artifact
-  * Uses: `domain.spice.compute_topology_signature`
-
-Rules:
-
-* Must fill `OperatorResult.provenance` with input/output fingerprints.
-* Must not embed long inline business rules that belong in `domain/` (e.g. fully custom parse logic).
-* All file I/O (temporary decks, raw results) occurs here, not inside domain or contracts.
-
-### 3.4 Policies
-
-Policies are “brains that suggest what to do next”, but they **do not execute tools**.
-
-They see an `Observation`:
-
-* spec (objectives/constraints),
-* current `CircuitSource` / `CircuitIR` / `ParamSpace`,
-* current metrics,
-* iteration index & history tail.
-
-They output:
-
-* `Patch` (parameter updates) or other structured decision (not free text netlist).
-
-LLM policy example:
-
-* Prompt: netlist (read-only), param table, metrics, objectives
-* Output: JSON-only patch `{ "ops": [...], "stop": false, "notes": "..." }`
-* The **system** (operators/strategy) applies the patch, not the policy itself.
-
-Rules:
-
-* Policies must not call ngspice, formal tools, etc.
-* Policies must not write files or change state; they only return decisions.
-
-### 3.5 Strategies
-
-Strategies orchestrate the loop:
-
-* Initialize IR, param space, sim plan, etc.
-* For each iteration:
-
-  * Compute metrics (via operators)
-  * Build an `Observation`
-  * Ask `Policy.propose(obs)`
-  * Validate `Patch` (via guard operator)
-  * Apply `Patch` (via operator)
-  * Re-simulate & update history
-* Decide stop reason (reached target / no improvement / budget / guard failures / policy stop)
-
-Rules:
-
-* Strategies don't know the tool internals.
-* Strategies use only the stable interfaces from `contracts` + injected operator/policy instances.
-* Stopping criteria must be explicit and reproducible, not hidden in LLM prompts.
+- `contracts/*` importing `domain.*`
+- `domain/*` importing `runtime.*`
+- `policies/*` importing simulation operators to run tools
+- `operators/*` importing strategies
 
 ---
 
-## 4. Patch-based modification: non-negotiable safety rule
+## 3. Unified attempt pipeline (shared contract)
 
-Whenever an LLM/policy wants to “change the circuit,” it must:
+All strategies that “evaluate a candidate” must follow the same pipeline and semantics.
+If you find duplicate implementations, refactor toward a shared helper.
 
-1. Propose a `Patch`:
+### 3.1 Canonical pipeline order
 
-   * Only `param_id`s from `ParamSpace`
-   * `op ∈ {set, add, mul}`
-   * values must be well-formed scalars (`float` or unit strings like `"180n"`)
+1) **Sanitize** the source (fail-closed include rules; `.control` removed)
+2) **Index / parse** into `CircuitIR`
+3) **Compute topology signature** (baseline structural fingerprint)
+4) **Policy proposes a Patch**
+5) **Patch validation guard** (param whitelist, frozen, bounds, step limits)
+6) **Deterministic patch apply** (value-only token edits using `CircuitIR.param_locs`)
+7) **Topology invariant guard** (signature must not change)
+8) **Deck build + simulation** (ngspice or other tool operators)
+9) **Metrics extraction / computation**
+10) **Behavior guard(s)** (spec constraints)
+11) **Record** results and provenance to the run directory
 
-2. `PatchValidateOperator`:
+### 3.2 Failure semantics
 
-   * Rejects:
-
-     * unknown param_ids
-     * frozen parameters
-     * values outside bounds
-     * step too large (e.g. mul > 1.25)
-   * Returns a structured result (ok/fail + reasons)
-
-3. `PatchApplyOperator`:
-
-   * Uses `CircuitIR.param_locs` to change **only the value part** in tokens.
-   * Must not add/remove lines.
-   * Must not change nodes or device types.
-
-4. `TopologyInvariantGuard`:
-
-   * Recomputes topology signature before/after apply.
-   * If signature changed → veto and mark patch as invalid.
-
-**You must NOT implement any path where a policy writes entire netlists directly.**
+- Guard failures must be recorded as structured `GuardCheck` results.
+- Tool failures (simulation/metric errors) must:
+  - be recorded,
+  - contribute correct accounting (see budgets below),
+  - and not corrupt the run directory structure.
 
 ---
 
-## 5. Docs discipline 📚
+## 4. Accounting, budgets, and reproducibility
 
-Whenever code changes affect behavior, interfaces, or architecture, you must also touch `docs/`.
+### 4.1 Simulation run counting (non-negotiable)
 
-### 5.1 Before coding
+If an evaluation runs multiple simulation kinds (e.g., AC + TRAN), **each kind counts**.
 
-* **Read**:
+Rule:
 
-  * `docs/wiki/01_unified_contract_overview.md`
-  * relevant ADRs in `docs/design/ADR-*.md`
-  * relevant specs in `docs/specs/` (if present)
+> `sim_runs_total` must equal the number of times a simulator was invoked.
 
-### 5.2 When adding / changing functionality
+Do not “guess” counts at higher layers.
+Counting belongs at the measurement layer where the simulator calls happen.
 
-You must consider updating **all适用**文档：
+### 4.2 Stop reasons must be explicit
 
-* `docs/wiki/`
+Strategies must use explicit stop reasons such as:
 
-  * If user-facing behavior or high-level flows changed.
-* `docs/specs/`
+- target met
+- no improvement
+- budget exhausted (iterations, wall-time, sim runs)
+- guard rejected
+- policy requested stop
 
-  * If any contract, JSON schema, or data format changed.
-* `docs/design/`
-
-  * If you made a structural/architectural decision, add/update an ADR.
-* `docs/devlog/`
-
-  * For each substantial change (new feature / refactor), append a new devlog with:
-
-    * Date & time
-    * Scope
-    * Files touched
-    * Rationale & notes
-    * Any migration notes or compatibility concerns
-* `docs/reports/`
-
-  * If you ran new experiments or produced comparative results relevant to deliverables.
-
-**Rule of thumb:**
-If a human collaborator reading only `docs/` would be surprised by the current code behavior, then the docs are outdated and must be updated.
+Stop logic must not be hidden inside prompts.
 
 ---
 
-## 6. How to handle a new task (standard workflow for you, the agent)
+## 5. Run directory + manifest rules
 
-When the user asks you to add / modify something, follow this pipeline:
+Runs must be self-describing.
 
-1. **Understand the level**
+### 5.1 Required top-level files
 
-   * Is it:
+A run directory should contain (names may vary slightly by strategy, but purpose must match):
 
-     * a new Artifact type?
-     * a new Operator (e.g. new sim tool)?
-     * a new Policy (new strategy for decisions)?
-     * a new Strategy (workflow)?
-   * Or a refactor of IR / patch / guards?
+- `manifest.json`  
+  The index: config, environment, tool versions, and a file list.
+- `summary.json`  
+  Stop reason, best score, budgets used, key rollups.
+- `history.jsonl`  
+  One record per attempt/iteration with enough detail to audit decisions.
 
-2. **Update / create specs**
+### 5.2 Optional strategy outputs (must be registered)
 
-   * If you introduce new artifact fields / JSON formats / operator IO:
+If present, these must be listed in `manifest.json`:
 
-     * Update or create a spec under `docs/specs/`.
-     * Make the format explicit (field names, types, allowed values, invariants).
+- `llm/` (prompts, responses, parsed patch JSON)
+- `search/` (candidates, topk, pareto, corner sets, scoring summaries)
+- `plans/` or equivalent (orchestrator plans and execution logs)
+- `provenance/` operator call traces and fingerprints
+- `report.md` or report artifacts
 
-3. **Implement in the right layer**
+**Rule:** if a file is part of the run’s meaning, it must be discoverable from the manifest.
 
-   * Put pure logic in `domain/`.
-   * Wrap it in `operators/` to talk to files/tools and `RunContext`.
-   * Connect via `Strategy` and `Policy` where needed.
+### 5.3 Path safety
 
-4. **Add or update tests**
+All stage names and relative paths written to disk must be sanitized to prevent path traversal.
 
-   * For domain: pure unit tests.
-   * For operators: integration tests that mock external behavior if needed.
-   * For strategies: smaller loops with mock policies/operators when possible.
+---
 
-5. **Update docs/devlog**
+## 6. Patch-based modification: safety invariants
 
+Whenever a policy wants to “change the circuit,” it must:
+
+1) Propose a `Patch`
+   - only `param_id`s from `ParamSpace`
+   - `op ∈ {set, add, mul}`
+   - values are well-formed scalars (float or engineering strings like `"180n"`)
+
+2) Pass patch validation guards
+   - reject unknown params, frozen params, out-of-bounds, unsafe steps
+
+3) Apply patch deterministically
+   - edit **only the value tokens**
+   - do not add/remove lines
+   - do not change nodes, element types, or models
+
+4) Pass topology signature guard
+   - signature before == signature after
+
+There must be no alternate path that lets a policy rewrite netlists.
+
+---
+
+## 7. Corner evaluation rules (for robustness strategies)
+
+Corner sets can easily become misleading if they fully overwrite design variables.
+
+Guidelines:
+
+- Prefer corners that represent **environment/variation parameters** (PVT, model corners, etc.).
+- Avoid corners that **override all search parameters** unless explicitly requested.
+- Baseline corner failures should be **recorded**, not used as a hard “gate” that prevents searching.
+- Corner definitions and scoring rules must be written to `search/corner_set.json` (or equivalent) and listed in the manifest.
+
+---
+
+## 8. ArtifactStore and plan execution
+
+If the repo uses `ArtifactStore` and `PlanExecutor`:
+
+- Artifacts stored for audit must be serializable.
+- If an artifact must be replayable across processes, it needs a stable schema and (ideally) a `type_tag` + decoder.
+- Plan execution must record:
+  - the plan document (JSON)
+  - per-step outcomes (success/failure, outputs)
+  - sub-run links (run IDs and paths)
+
+---
+
+## 9. Docs discipline
+
+Whenever code changes affect behavior, interfaces, architecture, or run artifacts, update `docs/`.
+
+At minimum consider:
+
+- `README.md` (how to install/run; what exists now)
+- `AGENT.md` (rules for layering, safety, run artifacts)
+- `docs/wiki/` (high-level explanations)
+- `docs/specs/` (schemas and formats)
+- `docs/design/` (ADRs for structural decisions)
+- `docs/devlog/` (short record of what changed and why)
+
+Rule of thumb:
+
+> If a collaborator reading only docs would be surprised by current behavior, docs are outdated.
+
+---
+
+## 10. Standard workflow checklist (for new work)
+
+1) Identify the correct layer (artifact/domain/operator/policy/strategy/runtime).
+2) Update or add specs if formats/contracts change.
+3) Implement in the right layer with minimal cross-layer coupling.
+4) Add tests:
+   - domain: pure unit tests
+   - operators: mock tools or integration markers
+   - strategies: mock policies/operators where possible
+5) Ensure run artifacts are complete and manifest-registered.
+6) Update docs/devlog.
    * Create a new devlog entry in `docs/devlog/` summarizing:
 
      * what changed,
      * why,
      * how to use it,
      * any caveats.
-
-6. **Preserve safety invariants**
+7) **Preserve safety invariants**
 
    * Ensure patch-based modification & guards are still respected.
    * Never introduce hidden paths that bypass validation.
-
 ---
 
-## 7. Code style & structure mini-rules
+## 11. Style and structure
 
 * One **Operator per file**, named after the action:
   `sanitize_spice.py`, `index_spice.py`, `ngspice_run.py`, `topology_invariant_guard.py`…
@@ -386,7 +302,7 @@ When the user asks you to add / modify something, follow this pipeline:
 
 ---
 
-## 8. Summary
+## 12. Summary
 
 As the LLM dev agent, your job is not only to “make it work,” but to:
 
@@ -399,4 +315,3 @@ As the LLM dev agent, your job is not only to “make it work,” but to:
 If in doubt, **prefer more structure over less** and keep parsing/logic **pure and testable** in `domain/`, with thin, well-named Operators wrapping them.
 
 Welcome to the Unified Circuit Processor. Don’t break the universe 🌌
-

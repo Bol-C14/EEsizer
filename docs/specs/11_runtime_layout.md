@@ -51,6 +51,10 @@ runs/<run_id>/
     candidates.json
     topk.json
     pareto.json
+  orchestrator/
+    plan.json
+    plan_execution.jsonl
+    artifacts/index.json
   report.md
 ```
 
@@ -59,6 +63,7 @@ All paths referenced in manifest/history SHOULD be relative to the run directory
 Grid search strategies SHOULD populate `search/` and `report.md` and register these files in the run manifest.
 Corner search strategies SHOULD add `search/corner_set.json`, populate `search/topk.json` and `search/pareto.json`, and include per-corner
 results in `history/iterations.jsonl`.
+Search strategies SHOULD ensure `search/*.json` and `search/*.md` outputs are indexed in `run_manifest.json`.
 
 ### JSONL schemas (minimal)
 
@@ -89,6 +94,7 @@ Examples:
 - Stage names SHOULD be unique within a run.
 - When a strategy retries within the same iteration, stage names SHOULD include an attempt suffix (e.g., `ac_i003_a01`) to avoid overwriting artifacts.
 - LLM stages SHOULD use `llm/llm_i{iter}_a{attempt}` and append retry suffixes (`_r01`) when parsing is retried.
+- Corner search stages SHOULD include a corner tag (e.g., `ac_corner_vdd_low_i003_a00`) so per-corner sims do not overwrite each other.
 
 ## 11.3 Recommended stage contents
 

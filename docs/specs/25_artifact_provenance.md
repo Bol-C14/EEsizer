@@ -70,7 +70,6 @@ Fields:
 - `inputs: dict[str, Any]` (hashes + signature)
 - `environment: dict[str, Any]` (python/platform/tool/policy metadata; SHOULD include a dependency version snapshot)
 - `files: dict[str, str]` (relative paths under run_dir)
-- `result_summary: dict[str, Any]` (best iter/score, stop reason, sim runs)
 - `result_summary: dict[str, Any]` (best iter/score, stop reason, sim runs total/ok/failed)
 - `tool_versions: dict[str, str]`
 - `env: dict[str, str]`
@@ -108,3 +107,14 @@ For `llm_call`, `notes` SHOULD include:
 - `usage` metadata when available
 
 Inputs SHOULD include a prompt or request hash and outputs SHOULD include a response hash.
+
+## 25.7 ArtifactStore (orchestrator)
+
+The runtime `ArtifactStore` persists plan artifacts under `orchestrator/artifacts/`.
+Stored JSON payloads include lightweight type tags (for example `__type__` and `__enum__`)
+so a later run can rehydrate core dataclasses when loading from disk.
+
+Requirements:
+- Artifact index entries SHOULD include `type_tag` when the stored value is a dataclass.
+- Reloading artifacts SHOULD restore at least core artifacts (`CircuitSource`, `CircuitSpec`, `ParamSpace`, `StrategyConfig`).
+- ArtifactStore SHOULD support reloading `orchestrator/artifacts/index.json` to rebuild its index.

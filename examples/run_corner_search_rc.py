@@ -41,6 +41,18 @@ def main() -> None:
         help="Candidate sampling mode.",
     )
     parser.add_argument("--corners", type=str, default="oat", help="Corner generation mode.")
+    parser.add_argument(
+        "--include-global-corners",
+        action="store_true",
+        help="Include all_low/all_high global corners.",
+    )
+    parser.add_argument(
+        "--corner-override-mode",
+        type=str,
+        default="add",
+        choices=("set", "add", "mul"),
+        help="Corner override mode for low/high offsets.",
+    )
     parser.add_argument("--top-k", type=int, default=5, help="Top-K to record.")
     parser.add_argument("--stop-on-first-pass", action="store_true", help="Stop when all corners pass.")
     args = parser.parse_args()
@@ -68,6 +80,8 @@ def main() -> None:
                 "span_mul": args.span_mul,
                 "scale": args.scale,
                 "corners": args.corners,
+                "include_global_corners": args.include_global_corners,
+                "corner_override_mode": args.corner_override_mode,
                 "top_k": args.top_k,
                 "stop_on_first_pass": args.stop_on_first_pass,
             },

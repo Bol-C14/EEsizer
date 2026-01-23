@@ -46,7 +46,7 @@ A workflow orchestrator that composes operators and policies into a pipeline wit
 - `run(source: CircuitSource, spec: CircuitSpec, ctx: RunContext) -> RunResult`
 
 ## 4) Where EEsizer fits
-EEsizer becomes a set of Strategies (e.g., sizing loop, corner search), operating over shared Artifacts and Operators.
+EEsizer becomes a set of Strategies (patch loop, grid search, corner search, multi-agent orchestrator), operating over shared Artifacts and Operators.
 
 Future:
 - Task 1–2 (verification): reuse the same Operator/Artifact discipline for coverage, COI extraction, formal checks.

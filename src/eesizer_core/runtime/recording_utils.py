@@ -110,6 +110,20 @@ def record_operator_result(recorder: RunRecorder | None, result: Any) -> None:
     recorder.append_jsonl("provenance/operator_calls.jsonl", payload)
 
 
+def _collect_search_files(recorder: RunRecorder) -> list[str]:
+    search_dir = recorder.run_dir / "search"
+    if not search_dir.exists():
+        return []
+    files: list[str] = []
+    for path in search_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in {".json", ".md"}:
+            continue
+        files.append(recorder.relpath(path))
+    return sorted(files)
+
+
 def _relativize_stage_map(stage_map: Mapping[str, str], recorder: RunRecorder | None) -> dict[str, str]:
     if recorder is None:
         return dict(stage_map)
@@ -216,6 +230,9 @@ def finalize_run(
             llm_files = collect_llm_files(recorder)
             if llm_files:
                 manifest.files["llm"] = llm_files
+            search_files = _collect_search_files(recorder)
+            for rel_path in search_files:
+                manifest.files.setdefault(rel_path, rel_path)
         try:
             if recorder is not None:
                 recorder.write_json("run_manifest.json", manifest.to_dict())

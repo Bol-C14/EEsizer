@@ -60,4 +60,30 @@ def test_corner_search_writes_outputs_and_corners(tmp_path: Path) -> None:
     for entry in result.history:
         assert "corners" in entry
 
-    assert result.history[0]["worst_corner_id"] == "all_high"
+    assert result.history[0]["worst_corner_id"] == "c1.value_high"
+
+
+def test_corner_search_does_not_gate_on_failed_baseline_corners(tmp_path: Path) -> None:
+    netlist = "R1 in out 1k\nC1 out 0 1p\n.end\n"
+    source = CircuitSource(kind=SourceKind.spice_netlist, text=netlist)
+    spec = CircuitSpec(objectives=(Objective(metric="ac_mag_db_at_1k", target=-1e-9, sense="ge"),))
+
+    def measure_fn(src: CircuitSource, _: int) -> MetricsBundle:
+        r_val = _parse_value(src.text, "r1")
+        c_val = _parse_value(src.text, "c1")
+        return _make_metrics(-(r_val * c_val))
+
+    strategy = CornerSearchStrategy(measure_fn=measure_fn)
+    cfg = StrategyConfig(
+        budget=OptimizationBudget(max_iterations=2, no_improve_patience=1),
+        notes={
+            "param_rules": {"allow_patterns": [r"^(r1\.value|c1\.value)$"]},
+            "guard_cfg": {"max_add_delta": 0.0},
+            "corner_search": {"mode": "coordinate", "levels": 2, "span_mul": 10.0, "scale": "linear"},
+        },
+    )
+    ctx = RunContext(workspace_root=tmp_path)
+
+    result = strategy.run(spec=spec, source=source, ctx=ctx, cfg=cfg)
+
+    assert len(result.history) > 1

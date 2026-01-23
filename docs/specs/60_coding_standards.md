@@ -7,6 +7,7 @@ This spec defines contribution rules so the project remains maintainable as it g
 - New work MUST not be added to `/legacy`.
 - `eesizer_core` is the reusable library.
 - Anything experimental should live under `examples/` or a dedicated `experiments/` folder.
+- Generated caches (`__pycache__`, `*.pyc`, `*.egg-info`, `.DS_Store`) MUST NOT be committed and MUST be excluded from packaging.
 
 ## 60.2 Style
 

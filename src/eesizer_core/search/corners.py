@@ -40,19 +40,53 @@ def _normalize_param_ids(param_space: ParamSpace, param_ids: Iterable[str] | Non
     return [str(pid).lower() for pid in param_ids]
 
 
+def _override_for_bounds(
+    *,
+    nominal: float | None,
+    lower: float,
+    upper: float,
+    override_mode: str,
+    errors: list[str],
+    param_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    mode = str(override_mode or "add").lower()
+    if mode not in {"set", "add", "mul"}:
+        errors.append(f"param '{param_id}' unsupported override_mode '{override_mode}'")
+        mode = "add"
+    if mode == "set":
+        return {"op": "set", "value": lower}, {"op": "set", "value": upper}
+    if nominal is None:
+        errors.append(f"param '{param_id}' missing nominal for {mode} override, falling back to set")
+        return {"op": "set", "value": lower}, {"op": "set", "value": upper}
+    if mode == "mul":
+        if nominal == 0.0:
+            errors.append(f"param '{param_id}' nominal=0 for mul override, falling back to set")
+            return {"op": "set", "value": lower}, {"op": "set", "value": upper}
+        return (
+            {"op": "mul", "value": lower / nominal},
+            {"op": "mul", "value": upper / nominal},
+        )
+    return (
+        {"op": "add", "value": lower - nominal},
+        {"op": "add", "value": upper - nominal},
+    )
+
+
 def build_corner_set(
     *,
     param_space: ParamSpace,
     nominal_values: Mapping[str, float],
     span_mul: float = 10.0,
-    param_ids: Iterable[str] | None = None,
+    corner_param_ids: Iterable[str] | None = None,
+    include_global_corners: bool = False,
+    override_mode: str = "add",
     mode: str = "oat",
 ) -> dict[str, Any]:
     mode_norm = str(mode or "oat").lower()
     if mode_norm != "oat":
         raise ValueError(f"unsupported corner mode '{mode}'")
 
-    ids = _normalize_param_ids(param_space, param_ids)
+    ids = _normalize_param_ids(param_space, corner_param_ids)
     bounds: dict[str, dict[str, float | None]] = {}
     errors: list[str] = []
     for param_id in ids:
@@ -70,29 +104,64 @@ def build_corner_set(
     active_ids = sorted(bounds.keys())
     corners: list[dict[str, Any]] = [
         {"corner_id": "nominal", "label": "nominal", "overrides": {}},
-        {"corner_id": "all_low", "label": "all_low", "overrides": {pid: bounds[pid]["lower"] for pid in active_ids}},
-        {"corner_id": "all_high", "label": "all_high", "overrides": {pid: bounds[pid]["upper"] for pid in active_ids}},
     ]
+    if include_global_corners:
+        all_low: dict[str, Any] = {}
+        all_high: dict[str, Any] = {}
+        for param_id in active_ids:
+            nominal = bounds[param_id]["nominal"]
+            lower = bounds[param_id]["lower"]
+            upper = bounds[param_id]["upper"]
+            if lower is None or upper is None:
+                continue
+            low_override, high_override = _override_for_bounds(
+                nominal=nominal,
+                lower=float(lower),
+                upper=float(upper),
+                override_mode=override_mode,
+                errors=errors,
+                param_id=param_id,
+            )
+            all_low[param_id] = low_override
+            all_high[param_id] = high_override
+        corners.append({"corner_id": "all_low", "label": "all_low", "overrides": all_low})
+        corners.append({"corner_id": "all_high", "label": "all_high", "overrides": all_high})
     for param_id in active_ids:
+        nominal = bounds[param_id]["nominal"]
+        lower = bounds[param_id]["lower"]
+        upper = bounds[param_id]["upper"]
+        if lower is None or upper is None:
+            continue
+        low_override, high_override = _override_for_bounds(
+            nominal=nominal,
+            lower=float(lower),
+            upper=float(upper),
+            override_mode=override_mode,
+            errors=errors,
+            param_id=param_id,
+        )
         corners.append(
             {
                 "corner_id": f"{param_id}_low",
                 "label": f"{param_id}_low",
-                "overrides": {param_id: bounds[param_id]["lower"]},
+                "overrides": {param_id: low_override},
             }
         )
         corners.append(
             {
                 "corner_id": f"{param_id}_high",
                 "label": f"{param_id}_high",
-                "overrides": {param_id: bounds[param_id]["upper"]},
+                "overrides": {param_id: high_override},
             }
         )
 
     return {
         "mode": mode_norm,
         "span_mul": span_mul,
+        "override_mode": str(override_mode or "add").lower(),
+        "include_global_corners": include_global_corners,
         "param_ids": active_ids,
+        "corner_param_ids": active_ids,
         "param_bounds": bounds,
         "corners": corners,
         "errors": errors,

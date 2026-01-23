@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from eesizer_core.contracts import CircuitSource, CircuitSpec, MetricsBundle, MetricValue, Objective
 from eesizer_core.contracts.enums import SourceKind
@@ -42,6 +43,16 @@ def test_grid_search_writes_run_outputs(tmp_path):
     assert (run_dir / "search" / "topk.json").exists()
     assert (run_dir / "search" / "pareto.json").exists()
     assert (run_dir / "report.md").exists()
+
+    manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    files = manifest.get("files", {})
+    for rel_path in (
+        "search/candidates.json",
+        "search/topk.json",
+        "search/pareto.json",
+        "report.md",
+    ):
+        assert rel_path in files
 
     candidates = (run_dir / "search" / "candidates.json").read_text(encoding="utf-8")
     assert candidates.strip()

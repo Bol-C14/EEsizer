@@ -14,8 +14,6 @@ from ..contracts import (
     StrategyConfig,
 )
 from ..contracts.enums import PatchOpType, StopReason
-from ..contracts.errors import MetricError, SimulationError, ValidationError
-from ..contracts.guards import GuardCheck, GuardReport
 from ..contracts.strategy import Strategy
 from ..contracts.provenance import stable_hash_json, stable_hash_str
 from ..domain.spice.params import ParamInferenceRules, infer_param_space_from_ir
@@ -32,7 +30,6 @@ from ..runtime.recorder import RunRecorder
 from ..runtime.recording_utils import (
     attempt_record,
     finalize_run,
-    guard_failures,
     guard_report_to_dict,
     param_space_to_dict,
     patch_to_dict,
@@ -43,7 +40,8 @@ from ..runtime.recording_utils import (
 )
 from ..search.samplers import coordinate_candidates, factorial_candidates, make_levels
 from ..sim import DeckBuildOperator, NgspiceRunOperator
-from .patch_loop.evaluate import MeasureFn, evaluate_metrics, measure_metrics, run_baseline
+from .attempt_pipeline import AttemptOperators, run_attempt
+from .patch_loop.evaluate import MeasureFn, evaluate_metrics, run_baseline
 from .patch_loop.planning import group_metric_names_by_kind
 
 
@@ -315,7 +313,7 @@ class GridSearchStrategy(Strategy):
                 notes={"best_score": best_score, "all_pass": best_all_pass, "recording_errors": recording_errors},
             )
 
-        param_ids = [p.param_id for p in param_space.params]
+        param_ids = [p.param_id for p in param_space.params if not p.frozen]
         cfg_param_ids = grid_cfg.get("param_ids")
         if isinstance(cfg_param_ids, (list, tuple)):
             param_ids = [str(pid).lower() for pid in cfg_param_ids]
@@ -360,6 +358,17 @@ class GridSearchStrategy(Strategy):
 
         candidate_entries: list[dict[str, Any]] = []
         candidate_losses: list[list[float]] = []
+        attempt_ops = AttemptOperators(
+            patch_guard_op=self.patch_guard_op,
+            patch_apply_op=self.patch_apply_op,
+            topology_guard_op=self.topology_guard_op,
+            behavior_guard_op=self.behavior_guard_op,
+            guard_chain_op=self.guard_chain_op,
+            formal_guard_op=None,
+            deck_build_op=self.deck_build_op,
+            sim_run_op=self.sim_run_op,
+            metrics_op=self.metrics_op,
+        )
 
         for idx, candidate in enumerate(candidates, start=1):
             if max_sim_runs is not None and sim_runs >= max_sim_runs:
@@ -372,36 +381,39 @@ class GridSearchStrategy(Strategy):
             ]
             patch = Patch(ops=tuple(patch_ops))
             signature_before = signature
-            new_source = source
-            new_signature = signature
-            new_circuit_ir = circuit_ir
-            metrics_i = None
-            stage_map_i: dict[str, str] = {}
-            warnings_i: list[str] = []
-            errors: list[str] = []
-            guard_report: GuardReport | None = None
-            attempts: list[dict[str, Any]] = []
-            checks: list[GuardCheck] = []
-
-            pre_check_res = self.patch_guard_op.run(
-                {
-                    "circuit_ir": circuit_ir,
-                    "param_space": param_space,
-                    "patch": patch,
-                    "spec": spec,
-                    "guard_cfg": guard_cfg,
-                },
-                ctx=None,
+            attempt_result = run_attempt(
+                iter_idx=idx,
+                attempt=0,
+                patch=patch,
+                cur_source=source,
+                cur_signature=signature,
+                circuit_ir=circuit_ir,
+                param_space=param_space,
+                spec=spec,
+                guard_cfg=guard_cfg,
+                apply_opts=apply_opts,
+                metric_groups=metric_groups,
+                ctx=ctx,
+                recorder=recorder,
+                manifest=manifest,
+                measure_fn=self.measure_fn,
+                ops=attempt_ops,
             )
-            record_operator_result(recorder, pre_check_res)
-            pre_check = pre_check_res.outputs["check"]
-            checks.append(pre_check)
-            if not pre_check.ok:
-                guard_chain_res = self.guard_chain_op.run({"checks": checks}, ctx=None)
-                record_operator_result(recorder, guard_chain_res)
-                guard_report = guard_chain_res.outputs["report"]
-                errors = guard_failures(guard_report)
-                attempts.append(attempt_record(0, patch, guard_report))
+            sim_runs += attempt_result.sim_runs
+            sim_runs_ok += attempt_result.sim_runs_ok
+            sim_runs_failed += attempt_result.sim_runs_failed
+            metrics_i = attempt_result.metrics
+            stage_map_i = attempt_result.stage_map
+            warnings_i = attempt_result.warnings
+            guard_report = attempt_result.guard_report
+            errors = attempt_result.guard_failures
+            attempts = [attempt_record(0, patch, guard_report, stage_map_i, warnings_i)]
+            new_source = attempt_result.new_source
+            new_signature = attempt_result.new_signature
+            new_circuit_ir = attempt_result.new_circuit_ir
+
+            if not attempt_result.success or metrics_i is None:
+                metrics_payload = {k: v.value for k, v in metrics_i.values.items()} if metrics_i else {}
                 history.append(
                     {
                         "iteration": idx,
@@ -409,184 +421,7 @@ class GridSearchStrategy(Strategy):
                         "patch": patch_to_dict(patch),
                         "signature_before": signature_before,
                         "signature_after": new_signature,
-                        "metrics": {k: v.value for k, v in baseline.metrics.values.items()},
-                        "score": float("inf"),
-                        "all_pass": False,
-                        "improved": False,
-                        "objectives": [],
-                        "sim_stages": {},
-                        "warnings": [],
-                        "errors": errors,
-                        "guard": guard_report_to_dict(guard_report) if guard_report else None,
-                        "attempts": attempts,
-                    }
-                )
-                record_history_entry(recorder, history[-1])
-                continue
-
-            try:
-                apply_res = self.patch_apply_op.run(
-                    {"source": source, "param_space": param_space, "patch": patch, **apply_opts},
-                    ctx=None,
-                )
-                record_operator_result(recorder, apply_res)
-                apply_outputs = apply_res.outputs
-                new_source = apply_outputs["source"]
-                new_signature = apply_outputs["topology_signature"]
-                new_circuit_ir = apply_outputs["circuit_ir"]
-            except ValidationError as exc:
-                check_name = "topology_guard" if "Topology changed" in str(exc) else "patch_guard"
-                checks.append(
-                    GuardCheck(
-                        name=check_name,
-                        ok=False,
-                        severity="hard",
-                        reasons=(str(exc),),
-                    )
-                )
-                guard_chain_res = self.guard_chain_op.run({"checks": checks}, ctx=None)
-                record_operator_result(recorder, guard_chain_res)
-                guard_report = guard_chain_res.outputs["report"]
-                errors = guard_failures(guard_report)
-                attempts.append(attempt_record(0, patch, guard_report))
-                history.append(
-                    {
-                        "iteration": idx,
-                        "candidate": dict(candidate),
-                        "patch": patch_to_dict(patch),
-                        "signature_before": signature_before,
-                        "signature_after": new_signature,
-                        "metrics": {k: v.value for k, v in baseline.metrics.values.items()},
-                        "score": float("inf"),
-                        "all_pass": False,
-                        "improved": False,
-                        "objectives": [],
-                        "sim_stages": {},
-                        "warnings": [],
-                        "errors": errors,
-                        "guard": guard_report_to_dict(guard_report) if guard_report else None,
-                        "attempts": attempts,
-                    }
-                )
-                record_history_entry(recorder, history[-1])
-                continue
-
-            topo_check_res = self.topology_guard_op.run(
-                {"signature_before": signature_before, "signature_after": new_signature},
-                ctx=None,
-            )
-            record_operator_result(recorder, topo_check_res)
-            topo_check = topo_check_res.outputs["check"]
-            checks.append(topo_check)
-            if not topo_check.ok:
-                guard_chain_res = self.guard_chain_op.run({"checks": checks}, ctx=None)
-                record_operator_result(recorder, guard_chain_res)
-                guard_report = guard_chain_res.outputs["report"]
-                errors = guard_failures(guard_report)
-                attempts.append(attempt_record(0, patch, guard_report))
-                history.append(
-                    {
-                        "iteration": idx,
-                        "candidate": dict(candidate),
-                        "patch": patch_to_dict(patch),
-                        "signature_before": signature_before,
-                        "signature_after": new_signature,
-                        "metrics": {k: v.value for k, v in baseline.metrics.values.items()},
-                        "score": float("inf"),
-                        "all_pass": False,
-                        "improved": False,
-                        "objectives": [],
-                        "sim_stages": {},
-                        "warnings": [],
-                        "errors": errors,
-                        "guard": guard_report_to_dict(guard_report) if guard_report else None,
-                        "attempts": attempts,
-                    }
-                )
-                record_history_entry(recorder, history[-1])
-                continue
-
-            try:
-                measurement = measure_metrics(
-                    source=new_source,
-                    metric_groups=metric_groups,
-                    ctx=ctx,
-                    iter_idx=idx,
-                    attempt_idx=0,
-                    recorder=recorder,
-                    manifest=manifest,
-                    measure_fn=self.measure_fn,
-                    deck_build_op=self.deck_build_op,
-                    sim_run_op=self.sim_run_op,
-                    metrics_op=self.metrics_op,
-                )
-                metrics_i = measurement.metrics
-                stage_map_i = measurement.stage_map
-                warnings_i = measurement.warnings
-                sim_runs += measurement.sim_runs
-                sim_runs_ok += measurement.sim_runs
-            except (SimulationError, MetricError, ValidationError) as exc:
-                sim_runs += 1
-                sim_runs_failed += 1
-                checks.append(
-                    GuardCheck(
-                        name="behavior_guard",
-                        ok=False,
-                        severity="hard",
-                        reasons=(str(exc),),
-                        data={"error_type": type(exc).__name__},
-                    )
-                )
-                guard_chain_res = self.guard_chain_op.run({"checks": checks}, ctx=None)
-                record_operator_result(recorder, guard_chain_res)
-                guard_report = guard_chain_res.outputs["report"]
-                errors = guard_failures(guard_report)
-                attempts.append(attempt_record(0, patch, guard_report))
-                history.append(
-                    {
-                        "iteration": idx,
-                        "candidate": dict(candidate),
-                        "patch": patch_to_dict(patch),
-                        "signature_before": signature_before,
-                        "signature_after": new_signature,
-                        "metrics": {k: v.value for k, v in baseline.metrics.values.items()},
-                        "score": float("inf"),
-                        "all_pass": False,
-                        "improved": False,
-                        "objectives": [],
-                        "sim_stages": {},
-                        "warnings": [],
-                        "errors": errors,
-                        "guard": guard_report_to_dict(guard_report) if guard_report else None,
-                        "attempts": attempts,
-                    }
-                )
-                record_history_entry(recorder, history[-1])
-                continue
-
-            behavior_check_res = self.behavior_guard_op.run(
-                {"metrics": metrics_i, "spec": spec, "stage_map": stage_map_i, "guard_cfg": guard_cfg},
-                ctx=None,
-            )
-            record_operator_result(recorder, behavior_check_res)
-            behavior_check = behavior_check_res.outputs["check"]
-            checks.append(behavior_check)
-
-            guard_chain_res = self.guard_chain_op.run({"checks": checks}, ctx=None)
-            record_operator_result(recorder, guard_chain_res)
-            guard_report = guard_chain_res.outputs["report"]
-            attempts.append(attempt_record(0, patch, guard_report, stage_map_i, warnings_i))
-            errors = guard_failures(guard_report)
-
-            if not guard_report.ok:
-                history.append(
-                    {
-                        "iteration": idx,
-                        "candidate": dict(candidate),
-                        "patch": patch_to_dict(patch),
-                        "signature_before": signature_before,
-                        "signature_after": new_signature,
-                        "metrics": {k: v.value for k, v in metrics_i.values.items()},
+                        "metrics": metrics_payload,
                         "score": float("inf"),
                         "all_pass": False,
                         "improved": False,

@@ -18,6 +18,7 @@ from ..runtime.context import RunContext
 from ..runtime.plan_executor import PlanExecutor
 from ..runtime.recorder import RunRecorder
 from ..runtime.recording_utils import finalize_run, record_operator_result
+from ..runtime.run_loader import RunLoader
 from ..runtime.tool_registry import ToolRegistry
 from .corner_search import CornerSearchStrategy
 from .grid_search import GridSearchStrategy
@@ -52,20 +53,16 @@ def _metrics_bundle_from_dict(payload: Mapping[str, Any]) -> MetricsBundle:
 
 
 def _load_best_from_run_dir(run_dir: Path, *, source: CircuitSource) -> tuple[Optional[CircuitSource], MetricsBundle]:
-    best_sp = run_dir / "best" / "best.sp"
-    best_metrics = run_dir / "best" / "best_metrics.json"
+    payload = RunLoader(run_dir).load_best()
+    best_sp = payload.get("best_sp", "")
+    best_metrics = payload.get("best_metrics", {})
 
     best_source: Optional[CircuitSource] = None
-    if best_sp.exists():
-        text = best_sp.read_text(encoding="utf-8")
-        best_source = CircuitSource(kind=source.kind, text=text, name=source.name, metadata=dict(source.metadata))
-
-    if best_metrics.exists():
-        import json
-
-        payload = json.loads(best_metrics.read_text(encoding="utf-8"))
-        return best_source, _metrics_bundle_from_dict(payload)
-    return best_source, MetricsBundle()
+    if best_sp:
+        best_source = CircuitSource(kind=source.kind, text=best_sp, name=source.name, metadata=dict(source.metadata))
+    if not isinstance(best_metrics, Mapping):
+        return best_source, MetricsBundle()
+    return best_source, _metrics_bundle_from_dict(best_metrics)
 
 
 @dataclass
