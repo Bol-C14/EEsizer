@@ -84,7 +84,7 @@ def coordinate_candidates(
             continue
         baseline = baseline_values.get(param_id)
         for value in levels:
-            if baseline is not None and isclose(value, baseline, rel_tol=1e-12, abs_tol=1e-12):
+            if baseline is not None and isclose(value, baseline, rel_tol=1e-12, abs_tol=0.0):
                 continue
             candidates.append({param_id: float(value)})
     return candidates
@@ -112,7 +112,7 @@ def factorial_candidates(
         candidate = {pid: float(val) for pid, val in zip(ids, combo)}
         if skip_baseline and baseline_values:
             if all(
-                isclose(candidate.get(pid, 0.0), baseline_values.get(pid, 0.0), rel_tol=1e-12, abs_tol=1e-12)
+                isclose(candidate.get(pid, 0.0), baseline_values.get(pid, 0.0), rel_tol=1e-12, abs_tol=0.0)
                 for pid in ids
             ):
                 continue

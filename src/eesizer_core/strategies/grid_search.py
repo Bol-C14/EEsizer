@@ -291,28 +291,6 @@ class GridSearchStrategy(Strategy):
         )
         record_history_entry(recorder, history[-1])
 
-        if stop_reason is StopReason.reached_target:
-            recording_errors = finalize_run(
-                recorder=recorder,
-                manifest=manifest,
-                best_source=best_source,
-                best_metrics=best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                best_score=best_score,
-                best_iter=best_iter,
-                sim_runs=sim_runs,
-                sim_runs_ok=sim_runs_ok,
-                sim_runs_failed=sim_runs_failed,
-            )
-            return RunResult(
-                best_source=best_source,
-                best_metrics=best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                notes={"best_score": best_score, "all_pass": best_all_pass, "recording_errors": recording_errors},
-            )
-
         param_ids = [p.param_id for p in param_space.params if not p.frozen]
         cfg_param_ids = grid_cfg.get("param_ids")
         if isinstance(cfg_param_ids, (list, tuple)):
@@ -345,6 +323,28 @@ class GridSearchStrategy(Strategy):
 
         if recorder is not None:
             recorder.write_json("search/candidates.json", candidates)
+
+        if stop_reason is StopReason.reached_target:
+            recording_errors = finalize_run(
+                recorder=recorder,
+                manifest=manifest,
+                best_source=best_source,
+                best_metrics=best_metrics,
+                history=history,
+                stop_reason=stop_reason,
+                best_score=best_score,
+                best_iter=best_iter,
+                sim_runs=sim_runs,
+                sim_runs_ok=sim_runs_ok,
+                sim_runs_failed=sim_runs_failed,
+            )
+            return RunResult(
+                best_source=best_source,
+                best_metrics=best_metrics,
+                history=history,
+                stop_reason=stop_reason,
+                notes={"best_score": best_score, "all_pass": best_all_pass, "recording_errors": recording_errors},
+            )
 
         validation_opts = {
             "wl_ratio_min": guard_cfg.get("wl_ratio_min"),

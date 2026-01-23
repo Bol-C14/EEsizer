@@ -61,6 +61,14 @@ def find_legacy_dir(start: Optional[Path] = None) -> Optional[Path]:
 
 def ensure_legacy_importable(start: Optional[Path] = None) -> bool:
     """Ensure legacy_eesizer is importable by injecting <repo>/legacy into sys.path."""
+    try:
+        import importlib.util
+
+        if importlib.util.find_spec("scipy") is None:
+            return False
+    except Exception:
+        return False
+
     legacy_dir = find_legacy_dir(start=start)
     if legacy_dir is None:
         return False
