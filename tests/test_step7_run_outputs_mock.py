@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from eesizer_core.contracts import CircuitSource, CircuitSpec, MetricsBundle, MetricValue, Objective
 from eesizer_core.contracts.artifacts import Patch, PatchOp
 from eesizer_core.contracts.enums import PatchOpType, SourceKind

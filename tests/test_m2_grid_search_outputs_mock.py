@@ -1,4 +1,3 @@
-from pathlib import Path
 import json
 
 from eesizer_core.contracts import CircuitSource, CircuitSpec, MetricsBundle, MetricValue, Objective

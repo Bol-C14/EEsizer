@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Run-scoped context used by operators/strategies to persist metadata."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Mapping
 
 from ..domain.spice.params import ParamInferenceRules, infer_param_space_from_ir
-from .base import Agent, AgentContext
+from .base import AgentContext
 
 
 def _lower_elem_map(circuit_ir) -> Dict[str, Any]:

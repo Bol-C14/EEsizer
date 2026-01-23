@@ -1,5 +1,3 @@
-import copy
-
 import pytest
 
 from eesizer_core.baselines.legacy_metrics_adapter import ensure_legacy_importable

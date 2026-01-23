@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """LLM-backed policy that returns structured Patch JSON only."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional

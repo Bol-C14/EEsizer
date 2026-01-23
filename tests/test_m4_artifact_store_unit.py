@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from eesizer_core.runtime.context import RunContext

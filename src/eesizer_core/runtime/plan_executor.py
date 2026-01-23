@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 """Execute a structured Plan against an ArtifactStore using a ToolRegistry."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Sequence
+from typing import Any, Dict, Sequence
 import time
 
 from ..contracts.plan import Action, validate_plan

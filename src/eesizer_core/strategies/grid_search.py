@@ -410,7 +410,6 @@ class GridSearchStrategy(Strategy):
             attempts = [attempt_record(0, patch, guard_report, stage_map_i, warnings_i)]
             new_source = attempt_result.new_source
             new_signature = attempt_result.new_signature
-            new_circuit_ir = attempt_result.new_circuit_ir
 
             if not attempt_result.success or metrics_i is None:
                 metrics_payload = {k: v.value for k, v in metrics_i.values.items()} if metrics_i else {}

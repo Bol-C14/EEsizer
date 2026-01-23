@@ -3,12 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
-import copy
 
 from ..agents import CircuitAnalysisAgent, KnobAgent, SearchPlannerAgent, SpecSynthAgent
 from ..agents.base import AgentContext
 from ..contracts import CircuitSource, CircuitSpec, MetricsBundle, MetricValue, RunResult, StrategyConfig
-from ..contracts.enums import SourceKind, StopReason
+from ..contracts.enums import StopReason
 from ..contracts.errors import ValidationError
 from ..contracts.plan import Action
 from ..contracts.provenance import stable_hash_json, stable_hash_str

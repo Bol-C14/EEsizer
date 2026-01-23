@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Record run inputs/outputs to disk in JSON or JSONL form."""
+
+from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from pathlib import Path

@@ -1,10 +1,10 @@
-from __future__ import annotations
-
 """Structured execution plans for multi-stage strategies.
 
 The intent is to keep LLM/agents constrained to proposing *data* (Plans/Patches),
 while deterministic Operators/Strategies do all side-effectful work.
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Sequence, Tuple

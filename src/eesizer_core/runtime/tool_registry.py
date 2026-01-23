@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """A small registry to map plan Actions to deterministic execution functions."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Mapping, Optional

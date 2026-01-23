@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """A small, auditable blackboard for multi-stage / multi-agent workflows.
 
 Design goals:
@@ -9,6 +7,8 @@ Design goals:
 
 This is intentionally lightweight: it is *not* a general-purpose object DB.
 """
+
+from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
 from pathlib import Path

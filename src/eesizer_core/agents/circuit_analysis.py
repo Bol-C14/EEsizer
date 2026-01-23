@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping
 
-from .base import Agent, AgentContext
+from .base import AgentContext
 
 
 def _etype_counts(circuit_ir) -> Dict[str, int]:

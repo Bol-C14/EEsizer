@@ -4,8 +4,6 @@ from eesizer_core.contracts import (
     MetricsBundle,
     MetricValue,
     Objective,
-    ParamDef,
-    ParamSpace,
     PatchOp,
     Patch,
 )
