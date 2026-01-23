@@ -1,10 +1,10 @@
-from __future__ import annotations
-
 """Operator wrapper for LLM calls with audit-friendly artifacts."""
+
+from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Mapping
 import json
 import os
 

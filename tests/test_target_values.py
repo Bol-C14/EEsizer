@@ -1,6 +1,11 @@
-import copy
+import pytest
 
-from agent_test_gpt import optimization
+from eesizer_core.baselines.legacy_metrics_adapter import ensure_legacy_importable
+
+if not ensure_legacy_importable():
+    pytest.skip("legacy_eesizer not available", allow_module_level=True)
+
+from legacy_eesizer import optimization
 
 
 def test_parse_target_values_no_globals_mutation():

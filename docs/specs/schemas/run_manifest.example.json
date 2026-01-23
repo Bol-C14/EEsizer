@@ -39,13 +39,20 @@
       "llm/llm_i001_a00/parsed_patch.json"
     ],
     "best/best.sp": "best/best.sp",
-    "best/best_metrics.json": "best/best_metrics.json"
+    "best/best_metrics.json": "best/best_metrics.json",
+    "search/corner_set.json": "search/corner_set.json",
+    "search/candidates.json": "search/candidates.json",
+    "search/topk.json": "search/topk.json",
+    "search/pareto.json": "search/pareto.json",
+    "report.md": "report.md"
   },
   "result_summary": {
     "stop_reason": "reached_target",
     "best_iter": 3,
     "best_score": 0.0,
     "sim_runs_total": 4,
+    "sim_runs_ok": 3,
+    "sim_runs_failed": 1,
     "guard_fail_counts": {"hard": 0, "soft": 1}
   },
   "env": {},

@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from eesizer_core.analysis.compare_runs import compare_runs, _objective_table

@@ -1,9 +1,8 @@
-import shutil
 from pathlib import Path
 
 import pytest
 
-from eesizer_core.contracts import CircuitSource, CircuitSpec, Objective, SimKind, SourceKind
+from eesizer_core.contracts import CircuitSource, CircuitSpec, Objective, SourceKind
 from eesizer_core.contracts.enums import StopReason
 from eesizer_core.contracts.strategy import StrategyConfig, OptimizationBudget
 from eesizer_core.policies import FixedSequencePolicy

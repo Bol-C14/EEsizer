@@ -1,379 +1,300 @@
 # EEsizer (Bol-C14/EEsizer)
 
-LLM-based AI Agent for Sizing of Analog and Mixed Signal Circuit
+EEsizer is a **modular, operator-driven framework** for analog / mixed-signal circuit processing and optimization.
 
-EEsizer is a **modular, operator-driven framework** for analog / mixed-signal circuit processing and optimization, designed to support:
+It is designed for research teams and multi-tool workflows that need:
 
-* **Safe, auditable netlist transformations**
-* **Deterministic simulation/metrics pipelines**
-* **Policy-driven optimization loops** (LLM, RL, Bayesian optimization, heuristics)
-* Future integration into a broader **Unified Circuit Processor** ecosystem (node transfer, verification copilot workflows, etc.)
+- **Safe, auditable netlist transformations**
+- **Deterministic simulation + metrics pipelines**
+- **Policy-driven optimization loops** (LLM, heuristics, and beyond)
+- **Reproducible runs** with structured artifacts and manifests
 
-> **Key design principle:**
-> LLMs (and any “policy”) should **not** directly rewrite netlists.
-> They should propose **parameter-only patches** (deltas), which are then applied by strict, deterministic, guard-railed local logic.
+**Key design principle**
+
+> LLMs (and any policy) must **not** directly rewrite netlists.  
+> Policies propose **parameter-only patches** (deltas), which are validated, applied, and guarded by deterministic local logic.
 
 ---
 
-## Project Status
+## Project status
 
-This repository has been refactored from a legacy notebook-based codebase into a maintainable package:
+This repository has been refactored from a legacy notebook-based codebase into a maintainable package.
 
-* ✅ **Step 1:** Contracts layer (Artifacts / Operators / Policy / Strategy / Errors / Provenance)
-* ✅ **Step 2:** SPICE netlist canonicalization + lightweight IR + topology signature guard
-* ✅ **Step 3:** Patch substrate (parameter-only editing with topology/schema guards)
-* ✅ **Step 4:** Simulation stack (DeckBuildOperator + NgspiceRunOperator + ComputeMetricsOperator + metrics registry)
-* ✅ **Step 5:** Strategy/Policy loops (PatchLoopStrategy + heuristic + LLM policies)
+### Milestones implemented so far
 
-> The `legacy/` directory contains old code and references.
+- ✅ **M1: Patch substrate + closed-loop patch optimization**
+  - Parameter-only patching (`Patch`), validation, deterministic apply
+  - Topology invariants and schema guards
+  - Patch-loop strategy with heuristic and LLM patch policies
+
+- ✅ **M2: Grid search strategy**
+  - Deterministic coordinate / factorial sampling over `ParamSpace`
+  - Search artifacts: candidates, top-k, Pareto sets
+
+- ✅ **M3: Corner search strategy**
+  - Evaluate candidates across a configurable corner set (global corners optional)
+  - Corner set export, per-corner reporting, robust worst-corner scoring
+
+- ✅ **M4: Multi-agent orchestration (experimental)**
+  - Plan-based orchestration across strategies and tools
+  - ArtifactStore and PlanExecutor to structure multi-step workflows
+
+> The `legacy/` directory contains reference code and figures.  
 > New development happens in `src/eesizer_core/`.
 
 ---
 
-## Why this architecture?
+## Quick feature map
 
-In research groups and multi-tool environments, the main pain points are:
+### Strategies (today)
 
-* repeated “glue” adapters everywhere
-* unclear boundaries between parsing, simulation, optimization, reporting
-* code that works once but becomes impossible to extend safely (especially with LLM agents)
+- **PatchLoopStrategy**
+  - Best for: iterative improvement under a single operating point
+  - Typical policies: heuristic coordinate, LLM patch proposer
 
-EEsizer solves this by enforcing:
+- **GridSearchStrategy**
+  - Best for: deterministic exploration and baseline comparisons
+  - Outputs: `search/candidates.json`, `search/topk.json`, `search/pareto.json`, `report.md`
 
-* **A unified artifact model** (`CircuitSource`, `CircuitIR`, `ParamSpace`, `Patch`, etc.)
-* **Composable operators** with consistent `run(inputs, ctx) -> outputs`
-* **Strict guards** (topology signature + schema invariants)
-* **Auditable provenance** (fingerprints, warnings, run metadata)
+- **CornerSearchStrategy**
+  - Best for: robustness evaluation across corners (process/voltage/temp or param perturbations)
+  - Defaults to per-parameter OAT corners; global corners are opt-in
+  - Outputs: `search/corner_set.json`, `search/topk.json`, `search/pareto.json`, `report.md`
+
+- **MultiAgentOrchestratorStrategy** (experimental)
+  - Best for: multi-step plans (explore → refine → verify → compare)
+  - Outputs: `orchestrator/plan.json` and `orchestrator/artifacts/index.json`
 
 ---
 
-## Repository Layout
+## Repository layout
 
-```
+```text
 .
 ├── src/
 │   └── eesizer_core/
 │       ├── contracts/            # Stable “public” contracts (types + protocols)
-│       │   ├── artifacts.py
-│       │   ├── operators.py
-│       │   ├── policy.py
-│       │   ├── strategy.py
-│       │   ├── errors.py
-│       │   ├── enums.py
-│       │   └── provenance.py
-│       ├── domain/
-│       │   └── spice/            # Pure functions for SPICE netlists (no side-effects)
-│       │       ├── sanitize_rules.py
-│       │       ├── parse.py
-│       │       └── signature.py
-│       ├── operators/
-│       │   └── netlist/          # Operator wrappers: sanitize/index/signature/patch_apply
+│       ├── domain/               # Pure domain logic (no side effects)
+│       ├── operators/            # Tool wrappers + stateful actions + guards
+│       ├── policies/             # Decision logic that proposes patches/plans
+│       ├── strategies/           # Orchestration loops (PatchLoop / Grid / Corner / Orchestrator)
 │       ├── sim/                  # Deck builder + ngspice runner + source adapter
-│       ├── metrics/              # Metric registry + compute operators + algorithms
-│       ├── io/                   # Shared IO helpers (e.g., wrdata loader)
-│       └── runtime/              # Runtime context, run ids, shared execution utilities
-├── tests/                        # Pytest suite (contracts + spice domain + operators + sim/metrics)
-├── examples/                     # Minimal runnable examples / demos
+│       ├── metrics/              # Metric registry + metric computation operators
+│       ├── runtime/              # RunContext, recorder, loaders, artifact store
+│       └── analysis/             # Run comparisons, post-processing
+├── tests/                        # Pytest suite (unit + mock + integration markers)
+├── examples/                     # Runnable examples and demos
+├── docs/                         # Wiki/specs/ADRs/devlogs/reports
 ├── legacy/                       # Legacy implementation (read-only reference)
 ├── pyproject.toml                # Packaging and dependencies
+├── requirements*.lock            # Fully pinned environments (recommended)
 └── README.md
 ```
 
 ---
 
-## Core Concepts (Quick Mental Model)
+## Core concepts (mental model)
 
-### Artifacts (Data)
+### Artifacts (typed data)
 
-Artifacts are *typed containers of information* that flow through the system.
+Artifacts are typed containers that flow through the system:
 
-Minimal set (already implemented):
+- `CircuitSource`: raw netlist text + metadata
+- `CircuitIR`: parsed, indexable representation (topology + token/param locations)
+- `ParamSpace`: whitelist of tunable parameters with bounds and frozen flags
+- `Patch`: parameter-only delta operations (`set/add/mul`)
+- `SimPlan`: requested simulations (dc/ac/tran/…)
+- `RunManifest` / `RunSummary`: run metadata, stop reason, file index, provenance links
 
-* `CircuitSource`: raw netlist text + metadata
-* `CircuitIR`: lightweight parsed representation (elements, nodes, token locations)
-* `ParamSpace`: whitelist of controllable parameters
-* `Patch`: parameter-only delta operations (set/add/mul)
-* `SimPlan`: requested simulations (planned for later stages)
-* `RunResult`: summary outputs + metrics + logs + provenance (later stages)
+Artifacts should be serializable and stable under hashing (used for provenance and caching).
 
-### Operators (Functions with contract)
+### Operators (deterministic actions with provenance)
 
 Operators are composable building blocks:
 
 ```text
-Operator.run(inputs, ctx) -> outputs
+Operator.run(inputs, ctx) -> OperatorResult(outputs, provenance)
 ```
 
-Operators should be:
+Examples:
 
-* deterministic if possible
-* auditable (provenance)
-* side-effect-free unless explicitly stated (e.g., running ngspice later)
+- sanitize / index / signature operators
+- patch validate / apply operators
+- simulation runners (ngspice)
+- metrics extractors and compute operators
+- guards (topology invariants, behavior constraints)
 
-### Policy (Proposer)
+### Policies (proposers)
 
-Policy proposes “what to do next”:
-
-* LLM policy
-* RL policy
-* Bayesian optimization policy
-* heuristic policy
+Policies propose “what to do next”:
 
 ```text
-Policy.propose(observation, ctx) -> Patch
+Policy.propose(observation, ctx) -> Patch  (or structured plan)
 ```
 
-### Strategy (Orchestrator)
+Policies must not run external tools directly and must not rewrite netlist text.
 
-Strategy runs a loop by composing operators and policies:
+### Strategies (orchestrators)
 
-* canonicalize netlist
-* apply patch
-* simulate
-* compute metrics
-* stop conditions
+Strategies coordinate operators and policies into a reproducible loop:
 
-```text
-Strategy.run(spec, source, ctx, cfg) -> RunResult
-```
+- build observation
+- ask policy for a proposal
+- validate + apply patch
+- run simulations + compute metrics
+- enforce guards and stop conditions
+- record everything
 
 ---
 
-## Getting Started
+## Installation
 
-### 1) Requirements
+### Recommended: fully pinned environment (lock files)
 
-* Python 3.10+ recommended (3.11 works well)
-* (Optional, future) ngspice for simulation stage
-
-### 2) Create a virtual environment
+From repository root:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-```
 
-### 3) Install EEsizer in editable mode (with dev deps)
+# Choose the lock file that matches your needs:
+pip install -r requirements-dev.lock   # dev + testing
+# or:
+pip install -r requirements.lock       # minimal runtime
 
-From repository root:
-
-```bash
-pip install -e ".[dev]"
-```
-
-For a fully pinned environment, use the lock files:
-
-```bash
-pip install -r requirements-dev.lock
 pip install -e .
 ```
 
-### 4) Run tests
+### Editable install with extras
+
+```bash
+pip install -e ".[dev]"
+# Optional:
+pip install -e ".[llm]"
+pip install -e ".[viz]"
+```
+
+### Optional: ngspice
+
+Some examples and integration tests require `ngspice` on your PATH:
+
+```bash
+ngspice -v
+```
+
+If ngspice is not installed, unit tests should still run; integration tests/examples will skip or fail gracefully.
+
+---
+
+## Running tests
 
 ```bash
 PYTHONPATH=src pytest -q
 ```
 
-> If you see `ModuleNotFoundError: eesizer_core`, it means the package is not installed in editable mode.
-> Fix: `pip install -e ".[dev]"` and rerun `pytest`.
-
-Example results (legacy reference):
-![Optimization results for the opamp.](/legacy/figures/rail-to-rail-process.png)
-![Variation results.](/legacy/figures/monte-carlo-10var.png)
-![Performance comparison of different LLMs](/legacy/figures/performance-new.png)
-
----
-
-## Dev Container (Recommended)
-
-We support a VSCode Dev Container workflow to avoid environment drift across team members.
-
-1. Install:
-
-* VSCode
-* “Dev Containers” extension
-* Docker Desktop / Docker Engine
-
-2. Open repository in VSCode
-3. Run: **Dev Containers: Reopen in Container** (the image builds from `.devcontainer/Dockerfile`)
-
-After container builds, dependencies will install automatically via `postCreateCommand`. If you need to rerun manually:
+To exclude integration tests:
 
 ```bash
-pip install -e ".[dev]"
-PYTHONPATH=src pytest
+PYTHONPATH=src pytest -q -m "not integration"
 ```
 
 ---
 
-## Usage: Canonicalize + Index + Signature (Step 2)
+## Usage examples
 
-### What Step 2 provides
+Examples live in `examples/`. Typical scripts include:
 
-* **Sanitization**: remove `.control` blocks, restrict `.include` paths (fail-closed for dangerous includes)
-* **Indexing**: build a lightweight IR that can locate editable tokens precisely
-* **Topology Signature**: a stable fingerprint that changes when and only when **structure** changes
+- a single-run simulation + metrics example (AC/DC/TRAN)
+- patch loop (heuristic / LLM policy)
+- grid search
+- corner search
+- orchestrator (experimental)
 
-### Canonical netlist pipeline
-
-Typical pipeline (operator layer):
-
-1. `SpiceSanitizeOperator`
-2. `IndexSpiceOperator`
-3. `TopologySignatureOperator`
-
-This ordering is enforced to prevent inconsistent IR/signature generation.
-
----
-
-## Usage: Run AC sim + metrics (Step 4)
-
-End-to-end demo (requires `ngspice` on PATH). If you installed the package in editable mode
-(`pip install -e .`), you can omit `PYTHONPATH=src`:
+Run scripts like:
 
 ```bash
-PYTHONPATH=src python examples/run_ac_once.py
+PYTHONPATH=src python examples/<script>.py
 ```
 
-```bash
-python examples/run_ac_once.py
+> If you see `ModuleNotFoundError: eesizer_core`, install editable mode:  
+> `pip install -e ".[dev]"`
+
+---
+
+## Run outputs (audit trail)
+
+Each run writes a self-contained directory (usually under `examples/output/runs/<run_id>/` or a user-configured base dir).
+
+A typical run directory contains:
+
+```text
+<run_id>/
+  manifest.json              # the index: config, environment, file list, versions
+  summary.json               # stop reason, best score, budget usage, etc.
+  history.jsonl              # per-iteration events (attempts, guard results, metrics)
+  best.json                   # best candidate patch + metrics summary
+  report.md                   # human-readable report (strategy-dependent)
+  llm/                         # prompts/responses (if an LLM policy/operator is used)
+  search/                      # search artifacts (grid/corner strategies)
+    candidates.json
+    topk.json
+    pareto.json
+    corner_set.json
+  provenance/                  # operator call traces and fingerprints
 ```
 
-This builds an AC deck for `examples/rc_lowpass.sp`, runs ngspice into `examples/output/runs/<run_id>/ac_example`, and computes AC metrics (`ac_mag_db_at_1k`, `ac_unity_gain_freq`). If ngspice is missing, the example will skip gracefully.
+**Guiding rule**
+
+> A run should be reproducible from: netlist text + patch JSON + tool versions + seed.
 
 ---
 
-## Usage: Patch loop with LLMPatchPolicy (Milestone 1)
+## Safety & correctness invariants
 
-Minimal closed-loop demo (RC lowpass, mock provider by default):
+These are non-negotiable:
 
-```bash
-PYTHONPATH=src python examples/run_patch_loop_llm.py --provider mock
-```
+1) **Policies do not rewrite netlists**  
+   Policies propose parameter patches only.
 
-Notes:
-* Requires `ngspice` on PATH.
-* For OpenAI, set `OPENAI_API_KEY` and use `--provider openai`.
-* Run artifacts include `llm/` prompt/response files under `examples/output/runs/<run_id>/`.
-* For other circuits, pass `--netlist` and update the spec in the script.
+2) **Patch validation is fail-closed**  
+   Unknown params, frozen params, out-of-bounds values, or unsafe steps are rejected.
 
----
+3) **Topology invariants are enforced**  
+   Topology signature must not change after patch apply.
 
-## Step 3 Recap: Patch Substrate (Parameter-only Editing)
-
-### Motivation
-
-Legacy EEsizer allowed the LLM to rewrite an entire netlist, which can accidentally:
-
-* break topology
-* change circuit function
-* introduce illegal syntax or unwanted components
-
-We instead enforce:
-
-> The LLM returns only a `Patch` that says “which parameters to change and how”.
-> The framework validates and applies it **deterministically** with strict constraints.
-
-### Patch Contract (planned/being implemented)
-
-A `Patch` is a list of operations:
-
-* `param`: `"m1.w"` (must exist in `ParamSpace` and `CircuitIR.param_locs`)
-* `op`: `"set" | "add" | "mul"`
-* `value`: numeric literal (float/int) or engineering form `"180n"`, `"2u"`, `"1e-6"`
-* `why`: optional explanation (recommended for audits)
-
-**Hard rules**
-
-* No netlist rewriting by policy
-* No new elements
-* No node changes
-* Apply must preserve topology signature & schema
+4) **Sanitization precedes indexing/signature/simulation**  
+   `.control` is removed; unsafe `.include` paths are rejected.
 
 ---
 
-## Safety & Correctness Guards
+## How to extend EEsizer
 
-We treat these as non-negotiable invariants:
+### Add a new operator
 
-1. **Topology Invariant Guard**
+1. Create a module under `src/eesizer_core/operators/...`
+2. Implement the `Operator` contract:
+   - validate inputs
+   - call domain logic or external tools
+   - return outputs + provenance
+3. Add tests under `tests/`
 
-* signature before == signature after
+### Add a new policy
 
-2. **Schema Invariant Guard**
+- Implement a policy that outputs `Patch` (or a structured plan for orchestrators)
+- Keep policies pure: no file writes, no tool calls
+- Add tests with mocked observations
 
-* set of `(element.param_keys)` and `param_locs` must not change
+### Add a new strategy
 
-3. **Fail-Closed Input Rules**
-
-* dangerous include paths rejected
-* `.control` blocks removed
-* indexing rejects non-sanitized input (to avoid parsing junk)
-
----
-
-## Provenance & Reproducibility
-
-The framework includes:
-
-* `ArtifactFingerprint`: stable hash for artifact identity
-* `Provenance`: operator-level trace of transformations
-* `RunContext`: run id / seed / notes (foundation for experiment tracking)
-
-Guiding rule:
-
-> Any result should be reproducible from:
-> netlist text + patch JSON + tool versions + seed.
+- Compose existing operators/policies
+- Reuse the shared attempt pipeline where possible
+- Make stop reasons explicit and reproducible
+- Ensure run artifacts are written and registered in `manifest.json`
 
 ---
 
-## How to Extend the Framework
-
-### Add a new Operator
-
-1. Create a new module under `src/eesizer_core/operators/...`
-2. Implement the `Operator` protocol:
-
-   * validate inputs
-   * call domain pure functions
-   * return outputs + provenance
-3. Add tests in `tests/`
-
-### Add a new Domain Rule (SPICE)
-
-Keep domain logic in `src/eesizer_core/domain/spice/`:
-
-* no file IO
-* no network
-* deterministic if possible
-* provide small focused functions
-
-### Add a new Policy (LLM/RL/Heuristic)
-
-Add to `src/eesizer_core/policies/` (or similar; not yet standardized):
-
-* must output `Patch`
-* must not modify netlist text
-* keep prompts/LLM client isolated from domain logic
-
----
-
-## Testing Guidelines
-
-We use `pytest`.
-
-Recommended test categories:
-
-* `test_spice_sanitize.py`: sanitization correctness + include restrictions
-* `test_spice_index.py`: parsing + param locations stable
-* `test_ir_signature.py`: signature invariants
-* (Step 3) `test_patch_validate.py`: constraints and fail-closed behavior
-* (Step 3) `test_patch_apply.py`: deterministic patch application + guards
-
----
-
-## Common Troubleshooting
+## Troubleshooting
 
 ### `ModuleNotFoundError: eesizer_core`
 
@@ -381,57 +302,37 @@ Fix (choose one):
 
 ```bash
 pip install -e .
-pytest
+pytest -q
 ```
+
+or:
 
 ```bash
 PYTHONPATH=src pytest -q
-PYTHONPATH=src python examples/run_ac_once.py
 ```
 
 ### `.include` is removed or warned
 
-This is intentional. We restrict include paths to avoid unsafe/irreproducible netlist execution.
-If you need includes, use controlled relative paths and avoid `..` and absolute paths.
+This is intentional. Include paths are restricted to avoid unsafe/irreproducible netlist execution.
+Prefer controlled relative includes and avoid `..` and absolute paths.
 
 ### Signature changes unexpectedly
 
-* check if you changed nodes / element names / models / param keys
-* note: signature intentionally ignores numeric values but is sensitive to structure
+- check if you changed nodes / element names / models / parameter keys
+- note: signature intentionally ignores numeric values but is sensitive to structure
 
 ---
 
-## Roadmap (Short)
+## Contributing
 
-* Step 6: Optimization and deployment
-  * richer metrics + corners
-  * multi-agent orchestration (policy selection + tool calling)
-  * integration toward node transfer workflows
-  * performance: incremental IR updates for large netlists and long runs
-
----
-
-## Contributing (Team Workflow)
-
-* Keep `legacy/` read-only
-* Add new functionality under `src/eesizer_core/`
-* Every new operator/domain rule must have tests
-* Internal code should import explicit modules (e.g., `eesizer_core.contracts`, `eesizer_core.operators.*`); top-level re-exports are for demos/notebooks
-* Prefer small PRs:
-
-  * one invariant / one operator / one test suite at a time
-
-
+- Keep `legacy/` read-only
+- Put new functionality under `src/eesizer_core/`
+- Every new operator/domain rule must have tests
+- Prefer small PRs: one invariant / one operator / one test suite at a time
+- Update `docs/` when behavior or formats change (wiki/specs/ADRs/devlog)
 
 ---
 
-## Contact / Maintainers
+## Maintainers
 
-* New structure developed and maintained by the PhD Researcher Shu Gu from University of Edinburgh
-* Repository: Bol-C14/EEsizer
-
----
-
-## Acknowledgements
-
-This work originally was made possible by Peter Denyer's PhD Scholarship at The University of Edinburgh.
+- Repository: Bol-C14/EEsizer

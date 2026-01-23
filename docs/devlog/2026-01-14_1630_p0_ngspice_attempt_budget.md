@@ -6,7 +6,7 @@
 - Counted simulation runs for all attempts (success or guard-fail) to keep budgets accurate.
 
 ## Files touched
-- Code: `src/eesizer_core/sim/ngspice_runner.py`, `src/eesizer_core/strategies/patch_loop.py`
+- Code: `src/eesizer_core/sim/ngspice_runner.py`, `src/eesizer_core/strategies/patch_loop/strategy.py`
 - Docs: `docs/specs/11_runtime_layout.md`
 
 ## Notes / Rationale

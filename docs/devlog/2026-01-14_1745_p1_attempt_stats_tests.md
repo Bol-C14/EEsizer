@@ -6,7 +6,7 @@
 - Added tests for attempt-stage naming and failed sim run counts.
 
 ## Files touched
-- Code: `src/eesizer_core/strategies/patch_loop.py`, `src/eesizer_core/runtime/run_loader.py`, `src/eesizer_core/contracts/provenance.py`
+- Code: `src/eesizer_core/strategies/patch_loop/strategy.py`, `src/eesizer_core/runtime/run_loader.py`, `src/eesizer_core/contracts/provenance.py`
 - Docs: `docs/specs/11_runtime_layout.md`, `docs/specs/25_artifact_provenance.md`
 - Tests: `tests/test_step7_stage_attempt_names.py`, `tests/test_step7_sim_runs_failed_counts.py`
 

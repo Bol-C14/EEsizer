@@ -6,7 +6,7 @@
 - Added Step 6 unit tests for guard logic, constraints, and strategy retries.
 
 ## Files touched
-- Code: `src/eesizer_core/contracts/guards.py`, `src/eesizer_core/operators/guards/*`, `src/eesizer_core/strategies/patch_loop.py`
+- Code: `src/eesizer_core/contracts/guards.py`, `src/eesizer_core/operators/guards/*`, `src/eesizer_core/strategies/patch_loop/strategy.py`
 - Docs: `docs/specs/26_artifact_guards.md`, `docs/specs/35_operator_guards.md`, `docs/specs/20_artifact_contracts.md`, `docs/specs/41_policy_strategy_contracts.md`, `docs/specs/00_index.md`
 - Tests: `tests/test_step6_guard_contract_smoke.py`, `tests/test_step6_patch_guard.py`, `tests/test_step6_topology_guard.py`, `tests/test_step6_behavior_guard.py`, `tests/test_step6_constraints_in_spec.py`, `tests/test_step6_strategy_retry_on_guard_fail.py`, `tests/test_step6_strategy_handles_sim_error.py`
 

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Randomized policy that nudges one parameter per iteration."""
+
+from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field

@@ -22,6 +22,31 @@ class MeasurementResult:
     stage_map: dict[str, str]
     warnings: list[str]
     sim_runs: int
+    sim_runs_ok: int
+    sim_runs_failed: int
+    ok: bool
+    error: Exception | None = None
+
+
+def _failure_result(
+    error: Exception,
+    *,
+    sim_runs: int,
+    sim_runs_ok: int,
+    sim_runs_failed: int,
+    stage_map: dict[str, str],
+    warnings: list[str],
+) -> MeasurementResult:
+    return MeasurementResult(
+        metrics=MetricsBundle(),
+        stage_map=stage_map,
+        warnings=warnings,
+        sim_runs=sim_runs,
+        sim_runs_ok=sim_runs_ok,
+        sim_runs_failed=sim_runs_failed,
+        ok=False,
+        error=error,
+    )
 
 
 def measure_metrics(
@@ -37,22 +62,56 @@ def measure_metrics(
     deck_build_op: Any,
     sim_run_op: Any,
     metrics_op: Any,
+    stage_tag: str | None = None,
 ) -> MeasurementResult:
     if measure_fn is not None:
-        return MeasurementResult(metrics=measure_fn(source, iter_idx), stage_map={}, warnings=[], sim_runs=0)
+        return MeasurementResult(
+            metrics=measure_fn(source, iter_idx),
+            stage_map={},
+            warnings=[],
+            sim_runs=0,
+            sim_runs_ok=0,
+            sim_runs_failed=0,
+            ok=True,
+        )
 
     bundles: list[MetricsBundle] = []
     stage_map: dict[str, str] = {}
     warnings: list[str] = []
     sim_runs = 0
+    sim_runs_ok = 0
+    sim_runs_failed = 0
 
     for kind, names in metric_groups.items():
         plan = sim_plan_for_kind(kind)
-        deck_res = deck_build_op.run({"circuit_source": source, "sim_plan": plan, "sim_kind": kind}, ctx=None)
+        try:
+            deck_res = deck_build_op.run({"circuit_source": source, "sim_plan": plan, "sim_kind": kind}, ctx=None)
+        except (SimulationError, MetricError, ValidationError) as exc:
+            return _failure_result(
+                exc,
+                sim_runs=sim_runs,
+                sim_runs_ok=sim_runs_ok,
+                sim_runs_failed=sim_runs_failed,
+                stage_map=stage_map,
+                warnings=warnings,
+            )
         record_operator_result(recorder, deck_res)
         deck = deck_res.outputs["deck"]
-        stage_name = f"{kind.value}_i{iter_idx:03d}_a{attempt_idx:02d}"
-        run_res = sim_run_op.run({"deck": deck, "stage": stage_name}, ctx)
+        tag = f"_{stage_tag}" if stage_tag else ""
+        stage_name = f"{kind.value}{tag}_i{iter_idx:03d}_a{attempt_idx:02d}"
+        sim_runs += 1
+        try:
+            run_res = sim_run_op.run({"deck": deck, "stage": stage_name}, ctx)
+        except (SimulationError, MetricError, ValidationError) as exc:
+            sim_runs_failed += 1
+            return _failure_result(
+                exc,
+                sim_runs=sim_runs,
+                sim_runs_ok=sim_runs_ok,
+                sim_runs_failed=sim_runs_failed,
+                stage_map=stage_map,
+                warnings=warnings,
+            )
         record_operator_result(recorder, run_res)
         if manifest is not None:
             version = run_res.provenance.notes.get("ngspice_version")
@@ -62,15 +121,34 @@ def measure_metrics(
             if path:
                 manifest.environment.setdefault("ngspice_path", path)
         raw = run_res.outputs["raw_data"]
-        metrics_res = metrics_op.run({"raw_data": raw, "metric_names": names}, ctx=None)
+        try:
+            metrics_res = metrics_op.run({"raw_data": raw, "metric_names": names}, ctx=None)
+        except (SimulationError, MetricError, ValidationError) as exc:
+            sim_runs_failed += 1
+            return _failure_result(
+                exc,
+                sim_runs=sim_runs,
+                sim_runs_ok=sim_runs_ok,
+                sim_runs_failed=sim_runs_failed,
+                stage_map=stage_map,
+                warnings=warnings,
+            )
         record_operator_result(recorder, metrics_res)
         bundles.append(metrics_res.outputs["metrics"])
         stage_map[kind.value] = str(raw.run_dir)
         warnings.extend(deck_res.warnings)
         warnings.extend(run_res.warnings)
-        sim_runs += 1
+        sim_runs_ok += 1
 
-    return MeasurementResult(metrics=merge_metrics(bundles), stage_map=stage_map, warnings=warnings, sim_runs=sim_runs)
+    return MeasurementResult(
+        metrics=merge_metrics(bundles),
+        stage_map=stage_map,
+        warnings=warnings,
+        sim_runs=sim_runs,
+        sim_runs_ok=sim_runs_ok,
+        sim_runs_failed=sim_runs_failed,
+        ok=True,
+    )
 
 
 def evaluate_metrics(spec: CircuitSpec, metrics: MetricsBundle) -> dict[str, Any]:
@@ -111,34 +189,34 @@ def run_baseline(
         if max_sim_runs is not None and sim_runs >= max_sim_runs:
             stop_reason = StopReason.budget_exhausted
             break
-        try:
-            measurement = measure_metrics(
-                source=source,
-                metric_groups=metric_groups,
-                ctx=ctx,
-                iter_idx=0,
-                attempt_idx=attempt,
-                recorder=recorder,
-                manifest=manifest,
-                measure_fn=measure_fn,
-                deck_build_op=deck_build_op,
-                sim_run_op=sim_run_op,
-                metrics_op=metrics_op,
-            )
-            metrics = measurement.metrics
-            stage_map = measurement.stage_map
-            warnings = measurement.warnings
-            sim_runs += measurement.sim_runs
-            sim_runs_ok += measurement.sim_runs
-        except (SimulationError, MetricError, ValidationError) as exc:
-            sim_runs += 1
-            sim_runs_failed += 1
+        measurement = measure_metrics(
+            source=source,
+            metric_groups=metric_groups,
+            ctx=ctx,
+            iter_idx=0,
+            attempt_idx=attempt,
+            recorder=recorder,
+            manifest=manifest,
+            measure_fn=measure_fn,
+            deck_build_op=deck_build_op,
+            sim_run_op=sim_run_op,
+            metrics_op=metrics_op,
+        )
+        metrics = measurement.metrics
+        stage_map = measurement.stage_map
+        warnings = measurement.warnings
+        sim_runs += measurement.sim_runs
+        sim_runs_ok += measurement.sim_runs_ok
+        sim_runs_failed += measurement.sim_runs_failed
+
+        if not measurement.ok:
+            error = measurement.error or SimulationError("measurement_failed")
             check = GuardCheck(
                 name="behavior_guard",
                 ok=False,
                 severity="hard",
-                reasons=(str(exc),),
-                data={"error_type": type(exc).__name__},
+                reasons=(str(error),),
+                data={"error_type": type(error).__name__},
             )
             guard_chain_res = guard_chain_op.run({"checks": [check]}, ctx=None)
             record_operator_result(recorder, guard_chain_res)

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Greedy coordinate-descent policy with adaptive per-parameter step sizes."""
+
+from __future__ import annotations
 
 import random
 import re

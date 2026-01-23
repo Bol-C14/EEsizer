@@ -32,7 +32,8 @@ from ...runtime.recording_utils import (
     spec_to_dict,
     strategy_cfg_to_dict,
 )
-from .attempt import AttemptOperators, propose_patch, run_attempt
+from ..attempt_pipeline import AttemptOperators, run_attempt
+from .attempt import propose_patch
 from .evaluate import MeasureFn, evaluate_metrics, run_baseline
 from .planning import group_metric_names_by_kind, make_observation
 from .state import LoopResult, PatchLoopConfig, PatchLoopState

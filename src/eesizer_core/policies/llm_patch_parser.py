@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Parse and validate Patch JSON emitted by LLM policies."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 import json

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Lightweight LLM request/response structures for operator use."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional

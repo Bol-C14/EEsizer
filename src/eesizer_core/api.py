@@ -40,7 +40,14 @@ from .contracts.policy import Policy, Observation
 from .contracts.strategy import Strategy, StrategyConfig, OptimizationBudget
 from .contracts.provenance import ArtifactFingerprint, Provenance, RunManifest
 from .baselines import LegacyMetricsBaseline
-from .strategies import NoOptBaselineStrategy, PatchLoopStrategy, evaluate_objectives
+from .strategies import (
+    CornerSearchStrategy,
+    GridSearchStrategy,
+    MultiAgentOrchestratorStrategy,
+    NoOptBaselineStrategy,
+    PatchLoopStrategy,
+    evaluate_objectives,
+)
 from .policies import FixedSequencePolicy, RandomNudgePolicy, GreedyCoordinatePolicy, LLMPatchPolicy
 from .operators import LLMCallOperator, LLMConfig, LLMRequest, LLMResponse
 from .sim import (
@@ -104,6 +111,9 @@ __all__ = [
     "OptimizationBudget",
     # strategies
     "NoOptBaselineStrategy",
+    "GridSearchStrategy",
+    "CornerSearchStrategy",
+    "MultiAgentOrchestratorStrategy",
     "PatchLoopStrategy",
     "evaluate_objectives",
     # baselines

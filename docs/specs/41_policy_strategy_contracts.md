@@ -54,13 +54,26 @@ Strategies MUST:
 - ensure every tool call is wrapped by an Operator
 - append a human-readable decision trace into `RunResult.history`
 
-### Reference strategy in repo
+### Reference strategies in repo
 - `PatchLoopStrategy`:
   - baseline: signature/IR -> ParamSpace -> grouped SimPlan per SimKind -> metrics -> objective eval
   - loop: policy -> PatchGuardOperator -> PatchApplyOperator -> TopologyGuardOperator -> sim run(s) -> BehaviorGuardOperator -> evaluate -> update best
   - stop reasons supported: `reached_target`, `policy_stop`, `no_improvement`, `max_iterations`, `budget_exhausted`, `guard_failed`
   - history records per-iteration: patch, guard report, attempts, signatures before/after, metrics, score, sim stage paths, warnings/errors
   - baseline sim errors are captured via guard reports and may stop early with `guard_failed`
+- `GridSearchStrategy`:
+  - deterministic coordinate/factorial sweep over `ParamSpace` (frozen params filtered by default)
+  - outputs `search/candidates.json`, `search/topk.json`, `search/pareto.json`, `report.md`
+  - uses shared attempt pipeline for consistent sim/guard behavior and sim run accounting
+- `CornerSearchStrategy`:
+  - evaluates each candidate across a corner set and aggregates worst-case scores/losses
+  - defaults to per-parameter OAT corners; `include_global_corners=false` unless explicitly enabled
+  - corner overrides are relative by default (`corner_override_mode=add`) so candidate changes affect corners
+  - baseline corner failures are recorded but do not gate search unless `require_baseline_corner_pass=true`
+  - outputs `search/corner_set.json`, `search/topk.json`, `search/pareto.json`, `report.md`
+- `MultiAgentOrchestratorStrategy`:
+  - agent-driven plan selection that runs grid/corner search sub-strategies
+  - records `orchestrator/plan.json`, `orchestrator/plan_execution.jsonl`, and artifact store index
 
 ### Stop conditions (recommended set)
 

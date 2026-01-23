@@ -1,0 +1,16 @@
+global-exclude __pycache__ *.py[cod] *.pyd *.pyo
+global-exclude *.log *.tmp *.bak *.swp
+global-exclude .DS_Store Thumbs.db
+global-exclude *.egg-info*
+
+prune build
+prune dist
+prune .pytest_cache
+prune .mypy_cache
+prune .ruff_cache
+prune .venv
+prune .venv2
+prune venv
+prune env
+prune output
+prune output_netlist

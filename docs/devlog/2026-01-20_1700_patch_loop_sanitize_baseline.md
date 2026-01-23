@@ -7,7 +7,7 @@
 
 ## Files touched
 
-- `src/eesizer_core/strategies/patch_loop.py`
+- `src/eesizer_core/strategies/patch_loop/strategy.py`
 
 ## Rationale & notes
 

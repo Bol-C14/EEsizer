@@ -85,6 +85,32 @@ Notes:
 - Run artifacts are written under `examples/output/runs/<run_id>/` and include `llm/` prompt/response files.
 - For other circuits (e.g., OTA), pass `--netlist` and update the spec in the script.
 
+## Running the grid search demo (Milestone 2)
+
+Deterministic coordinate grid search on the RC demo:
+
+```bash
+PYTHONPATH=src python examples/run_grid_search_rc.py --max-iters 21 --levels 10 --span-mul 10 --scale log --mode coordinate
+```
+
+Notes:
+- Requires `ngspice` on PATH.
+- Run artifacts are written under `examples/output/runs/<run_id>/` and include `search/` outputs and `report.md`.
+- For other circuits, pass `--netlist` and update the spec in the script.
+
+## Running the corner search demo (Milestone 3)
+
+Deterministic corner search on the RC demo:
+
+```bash
+PYTHONPATH=src python examples/run_corner_search_rc.py --max-iters 21 --levels 10 --span-mul 10 --scale log --mode coordinate --corners oat
+```
+
+Notes:
+- Requires `ngspice` on PATH.
+- Run artifacts are written under `examples/output/runs/<run_id>/` and include `search/corner_set.json`, robust summaries, and `report.md`.
+- Use `--include-global-corners` to add `all_low/all_high` stress-test corners.
+
 ## Future CLI target (not yet implemented)
 Planned `eesizer_cli` flow (design target, not present in repo yet):
 ```bash

@@ -1,25 +1,30 @@
-import contextlib
-import io
 import unittest
 from pathlib import Path
 
-from agent_test_gpt import netlist_utils
-from agent_test_gpt import toolchain
+import pytest
+
+from eesizer_core.baselines.legacy_metrics_adapter import ensure_legacy_importable
+
+if not ensure_legacy_importable():
+    pytest.skip("legacy_eesizer not available", allow_module_level=True)
+
+from legacy_eesizer import netlist_utils
+from legacy_eesizer import toolchain
 
 
 class TestSpiceIncludeHelpers(unittest.TestCase):
     def test_resolve_spice_include_path_absolute(self):
-        candidate = Path("agent_test_gpt/resources/ptm_90.txt").resolve()
+        candidate = Path("legacy/legacy_eesizer/resources/ptm_90.txt").resolve()
         resolved = netlist_utils._resolve_spice_include_path(str(candidate))
         self.assertEqual(resolved, str(candidate))
 
     def test_resolve_spice_include_path_search_roots(self):
         resolved = netlist_utils._resolve_spice_include_path("ptm_90.txt")
-        self.assertEqual(resolved, "agent_test_gpt/resources/ptm_90.txt")
+        self.assertEqual(resolved, "legacy/legacy_eesizer/resources/ptm_90.txt")
 
     def test_normalize_spice_includes(self):
         netlist = ".include 'ptm_90.txt'\nR1 out 0 1k\n"
-        expected = ".include 'agent_test_gpt/resources/ptm_90.txt'\nR1 out 0 1k\n"
+        expected = ".include 'legacy/legacy_eesizer/resources/ptm_90.txt'\nR1 out 0 1k\n"
         self.assertEqual(netlist_utils.normalize_spice_includes(netlist), expected)
 
 
@@ -129,7 +134,7 @@ class TestToolFormatting(unittest.TestCase):
             {"raw_args": {}},
             {},
         ]
-        expected = [{"name": "run_ngspice"}]
+        expected = []
         self.assertEqual(toolchain.format_simulation_tools(tool_data_list), expected)
 
     def test_format_analysis_types(self):

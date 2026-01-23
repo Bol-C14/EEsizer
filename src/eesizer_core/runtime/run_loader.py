@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Utilities for reading recorded run artifacts from disk."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
