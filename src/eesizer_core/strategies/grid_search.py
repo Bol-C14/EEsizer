@@ -13,6 +13,7 @@ from ..contracts import (
     RunResult,
     StrategyConfig,
 )
+from ..contracts.errors import ValidationError
 from ..contracts.enums import PatchOpType, StopReason
 from ..contracts.strategy import Strategy
 from ..contracts.provenance import stable_hash_json, stable_hash_str
@@ -50,6 +51,58 @@ def _grid_cfg(notes: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(raw, Mapping):
         return dict(raw)
     return {}
+
+
+@dataclass
+class _GridPrepared:
+    history: list[dict[str, Any]]
+    recorder: RunRecorder | None
+    manifest: Any
+    cfg: StrategyConfig
+    source: CircuitSource
+    circuit_ir: Any
+    signature: str
+    param_space: Any
+    guard_cfg: dict[str, Any]
+    grid_cfg: dict[str, Any]
+    metric_groups: Mapping[Any, list[str]]
+    max_iters: int
+    max_sim_runs: int | None
+    candidate_budget: int
+    mode: str
+    levels: int
+    span_mul: float
+    scale: str
+    top_k_count: int
+    stop_on_first_pass: bool
+    baseline_retries: int
+
+
+@dataclass
+class _GridState:
+    best_source: CircuitSource
+    best_metrics: MetricsBundle
+    best_score: float
+    best_all_pass: bool
+    best_iter: int | None
+    sim_runs: int
+    sim_runs_ok: int
+    sim_runs_failed: int
+
+
+@dataclass
+class _GridBaselineOutcome:
+    result: RunResult | None
+    baseline: Any | None
+    eval0: dict[str, Any] | None
+    state: _GridState | None
+    stop_reason: StopReason | None
+
+
+@dataclass
+class _GridCandidates:
+    candidates: list[dict[str, float]]
+    param_value_errors: list[str]
 
 
 @dataclass
@@ -93,7 +146,7 @@ class GridSearchStrategy(Strategy):
         if self.registry is None:
             self.registry = DEFAULT_REGISTRY
 
-    def run(self, spec: CircuitSpec, source: CircuitSource, ctx: Any, cfg: StrategyConfig) -> RunResult:  # type: ignore[override]
+    def _prepare(self, spec: CircuitSpec, source: CircuitSource, ctx: Any, cfg: StrategyConfig) -> _GridPrepared:
         history: list[dict[str, Any]] = []
         recorder: RunRecorder | None = None
         manifest = None
@@ -194,16 +247,46 @@ class GridSearchStrategy(Strategy):
         metric_names = [obj.metric for obj in spec.objectives]
         metric_groups = group_metric_names_by_kind(self.registry, metric_names)
 
-        baseline = run_baseline(
-            source=source,
-            spec=spec,
-            metric_groups=metric_groups,
-            ctx=ctx,
-            guard_cfg=guard_cfg,
-            max_retries=baseline_retries,
-            max_sim_runs=max_sim_runs,
+        return _GridPrepared(
+            history=history,
             recorder=recorder,
             manifest=manifest,
+            cfg=cfg,
+            source=source,
+            circuit_ir=circuit_ir,
+            signature=signature,
+            param_space=param_space,
+            guard_cfg=guard_cfg,
+            grid_cfg=grid_cfg,
+            metric_groups=metric_groups,
+            max_iters=max_iters,
+            max_sim_runs=max_sim_runs,
+            candidate_budget=candidate_budget,
+            mode=mode,
+            levels=levels,
+            span_mul=span_mul,
+            scale=scale,
+            top_k_count=top_k_count,
+            stop_on_first_pass=stop_on_first_pass,
+            baseline_retries=baseline_retries,
+        )
+
+    def _baseline_phase(
+        self,
+        prepared: _GridPrepared,
+        spec: CircuitSpec,
+        ctx: Any,
+    ) -> _GridBaselineOutcome:
+        baseline = run_baseline(
+            source=prepared.source,
+            spec=spec,
+            metric_groups=prepared.metric_groups,
+            ctx=ctx,
+            guard_cfg=prepared.guard_cfg,
+            max_retries=prepared.baseline_retries,
+            max_sim_runs=prepared.max_sim_runs,
+            recorder=prepared.recorder,
+            manifest=prepared.manifest,
             measure_fn=self.measure_fn,
             deck_build_op=self.deck_build_op,
             sim_run_op=self.sim_run_op,
@@ -213,13 +296,13 @@ class GridSearchStrategy(Strategy):
         )
 
         if not baseline.success:
-            history.append(
+            prepared.history.append(
                 {
                     "iteration": 0,
                     "candidate": None,
                     "patch": None,
-                    "signature_before": signature,
-                    "signature_after": signature,
+                    "signature_before": prepared.signature,
+                    "signature_after": prepared.signature,
                     "metrics": {},
                     "score": float("inf"),
                     "all_pass": False,
@@ -232,13 +315,13 @@ class GridSearchStrategy(Strategy):
                     "attempts": baseline.attempts,
                 }
             )
-            record_history_entry(recorder, history[-1])
+            record_history_entry(prepared.recorder, prepared.history[-1])
             recording_errors = finalize_run(
-                recorder=recorder,
-                manifest=manifest,
-                best_source=source,
+                recorder=prepared.recorder,
+                manifest=prepared.manifest,
+                best_source=prepared.source,
                 best_metrics=MetricsBundle(),
-                history=history,
+                history=prepared.history,
                 stop_reason=baseline.stop_reason,
                 best_score=float("inf"),
                 best_iter=None,
@@ -246,40 +329,47 @@ class GridSearchStrategy(Strategy):
                 sim_runs_ok=baseline.sim_runs_ok,
                 sim_runs_failed=baseline.sim_runs_failed,
             )
-            return RunResult(
-                best_source=source,
-                best_metrics=MetricsBundle(),
-                history=history,
+            return _GridBaselineOutcome(
+                result=RunResult(
+                    best_source=prepared.source,
+                    best_metrics=MetricsBundle(),
+                    history=prepared.history,
+                    stop_reason=baseline.stop_reason,
+                    notes={
+                        "best_score": float("inf"),
+                        "all_pass": False,
+                        "recording_errors": recording_errors,
+                    },
+                ),
+                baseline=None,
+                eval0=None,
+                state=None,
                 stop_reason=baseline.stop_reason,
-                notes={
-                    "best_score": float("inf"),
-                    "all_pass": False,
-                    "recording_errors": recording_errors,
-                },
             )
 
         eval0 = evaluate_metrics(spec, baseline.metrics)
-        best_source = source
-        best_metrics = baseline.metrics
-        best_score = eval0["score"]
-        best_all_pass = eval0["all_pass"]
-        best_iter = 0
-        stop_reason: StopReason | None = StopReason.reached_target if best_all_pass else None
+        state = _GridState(
+            best_source=prepared.source,
+            best_metrics=baseline.metrics,
+            best_score=eval0["score"],
+            best_all_pass=eval0["all_pass"],
+            best_iter=0,
+            sim_runs=baseline.sim_runs,
+            sim_runs_ok=baseline.sim_runs_ok,
+            sim_runs_failed=baseline.sim_runs_failed,
+        )
+        stop_reason: StopReason | None = StopReason.reached_target if state.best_all_pass else None
 
-        sim_runs = baseline.sim_runs
-        sim_runs_ok = baseline.sim_runs_ok
-        sim_runs_failed = baseline.sim_runs_failed
-
-        history.append(
+        prepared.history.append(
             {
                 "iteration": 0,
                 "candidate": None,
                 "patch": None,
-                "signature_before": signature,
-                "signature_after": signature,
+                "signature_before": prepared.signature,
+                "signature_after": prepared.signature,
                 "metrics": {k: v.value for k, v in baseline.metrics.values.items()},
-                "score": best_score,
-                "all_pass": best_all_pass,
+                "score": state.best_score,
+                "all_pass": state.best_all_pass,
                 "improved": False,
                 "objectives": eval0["per_objective"],
                 "sim_stages": baseline.stage_map,
@@ -289,70 +379,78 @@ class GridSearchStrategy(Strategy):
                 "attempts": baseline.attempts,
             }
         )
-        record_history_entry(recorder, history[-1])
+        record_history_entry(prepared.recorder, prepared.history[-1])
 
-        param_ids = [p.param_id for p in param_space.params if not p.frozen]
-        cfg_param_ids = grid_cfg.get("param_ids")
+        return _GridBaselineOutcome(
+            result=None,
+            baseline=baseline,
+            eval0=eval0,
+            state=state,
+            stop_reason=stop_reason,
+        )
+
+    def _generate_candidates(self, prepared: _GridPrepared) -> _GridCandidates:
+        param_ids = [p.param_id for p in prepared.param_space.params if not p.frozen]
+        cfg_param_ids = prepared.grid_cfg.get("param_ids")
         if isinstance(cfg_param_ids, (list, tuple)):
             param_ids = [str(pid).lower() for pid in cfg_param_ids]
+        allow_param_override = bool(prepared.grid_cfg.get("allow_param_ids_override_frozen", False))
+        frozen_conflicts = [
+            pid
+            for pid in param_ids
+            if (prepared.param_space.get(pid) is not None and prepared.param_space.get(pid).frozen)
+        ]
+        if frozen_conflicts and not allow_param_override:
+            raise ValidationError(
+                "grid_search param_ids include frozen params: "
+                f"{', '.join(sorted(set(frozen_conflicts)))}; set allow_param_ids_override_frozen=true to override"
+            )
 
-        baseline_values, param_value_errors = extract_param_values(circuit_ir, param_ids=param_ids)
+        baseline_values, param_value_errors = extract_param_values(prepared.circuit_ir, param_ids=param_ids)
         per_param_levels: dict[str, list[float]] = {}
         for param_id in param_ids:
             if param_id not in baseline_values:
                 continue
-            param_def = param_space.get(param_id)
+            param_def = prepared.param_space.get(param_id)
             if param_def is None:
                 continue
             per_param_levels[param_id] = make_levels(
                 nominal=baseline_values[param_id],
                 lower=param_def.lower,
                 upper=param_def.upper,
-                levels=levels,
-                span_mul=span_mul,
-                scale=scale,
+                levels=prepared.levels,
+                span_mul=prepared.span_mul,
+                scale=prepared.scale,
             )
 
-        if mode == "factorial":
+        if prepared.mode == "factorial":
             candidates = factorial_candidates(param_ids, per_param_levels, baseline_values)
         else:
             candidates = coordinate_candidates(param_ids, per_param_levels, baseline_values)
 
-        if candidate_budget and len(candidates) > candidate_budget:
-            candidates = candidates[:candidate_budget]
+        if prepared.candidate_budget and len(candidates) > prepared.candidate_budget:
+            candidates = candidates[: prepared.candidate_budget]
 
-        if recorder is not None:
-            recorder.write_json("search/candidates.json", candidates)
+        if prepared.recorder is not None:
+            prepared.recorder.write_json("search/candidates.json", candidates)
 
-        if stop_reason is StopReason.reached_target:
-            recording_errors = finalize_run(
-                recorder=recorder,
-                manifest=manifest,
-                best_source=best_source,
-                best_metrics=best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                best_score=best_score,
-                best_iter=best_iter,
-                sim_runs=sim_runs,
-                sim_runs_ok=sim_runs_ok,
-                sim_runs_failed=sim_runs_failed,
-            )
-            return RunResult(
-                best_source=best_source,
-                best_metrics=best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                notes={"best_score": best_score, "all_pass": best_all_pass, "recording_errors": recording_errors},
-            )
+        return _GridCandidates(candidates=candidates, param_value_errors=param_value_errors)
 
+    def _evaluate_candidates_loop(
+        self,
+        prepared: _GridPrepared,
+        spec: CircuitSpec,
+        ctx: Any,
+        state: _GridState,
+        candidates: list[dict[str, float]],
+    ) -> tuple[list[dict[str, Any]], list[list[float]], StopReason, _GridState]:
         validation_opts = {
-            "wl_ratio_min": guard_cfg.get("wl_ratio_min"),
-            "max_mul_factor": guard_cfg.get("max_mul_factor", 10.0),
+            "wl_ratio_min": prepared.guard_cfg.get("wl_ratio_min"),
+            "max_mul_factor": prepared.guard_cfg.get("max_mul_factor", 10.0),
         }
         apply_opts = {
-            "include_paths": cfg.notes.get("include_paths", True),
-            "max_lines": cfg.notes.get("max_lines", 50000),
+            "include_paths": prepared.cfg.notes.get("include_paths", True),
+            "max_lines": prepared.cfg.notes.get("max_lines", 50000),
             "validation_opts": validation_opts,
         }
 
@@ -370,8 +468,10 @@ class GridSearchStrategy(Strategy):
             metrics_op=self.metrics_op,
         )
 
+        stop_reason: StopReason | None = None
+
         for idx, candidate in enumerate(candidates, start=1):
-            if max_sim_runs is not None and sim_runs >= max_sim_runs:
+            if prepared.max_sim_runs is not None and state.sim_runs >= prepared.max_sim_runs:
                 stop_reason = StopReason.budget_exhausted
                 break
 
@@ -380,28 +480,28 @@ class GridSearchStrategy(Strategy):
                 for pid, val in candidate.items()
             ]
             patch = Patch(ops=tuple(patch_ops))
-            signature_before = signature
+            signature_before = prepared.signature
             attempt_result = run_attempt(
                 iter_idx=idx,
                 attempt=0,
                 patch=patch,
-                cur_source=source,
-                cur_signature=signature,
-                circuit_ir=circuit_ir,
-                param_space=param_space,
+                cur_source=prepared.source,
+                cur_signature=prepared.signature,
+                circuit_ir=prepared.circuit_ir,
+                param_space=prepared.param_space,
                 spec=spec,
-                guard_cfg=guard_cfg,
+                guard_cfg=prepared.guard_cfg,
                 apply_opts=apply_opts,
-                metric_groups=metric_groups,
+                metric_groups=prepared.metric_groups,
                 ctx=ctx,
-                recorder=recorder,
-                manifest=manifest,
+                recorder=prepared.recorder,
+                manifest=prepared.manifest,
                 measure_fn=self.measure_fn,
                 ops=attempt_ops,
             )
-            sim_runs += attempt_result.sim_runs
-            sim_runs_ok += attempt_result.sim_runs_ok
-            sim_runs_failed += attempt_result.sim_runs_failed
+            state.sim_runs += attempt_result.sim_runs
+            state.sim_runs_ok += attempt_result.sim_runs_ok
+            state.sim_runs_failed += attempt_result.sim_runs_failed
             metrics_i = attempt_result.metrics
             stage_map_i = attempt_result.stage_map
             warnings_i = attempt_result.warnings
@@ -410,10 +510,11 @@ class GridSearchStrategy(Strategy):
             attempts = [attempt_record(0, patch, guard_report, stage_map_i, warnings_i)]
             new_source = attempt_result.new_source
             new_signature = attempt_result.new_signature
+            new_circuit_ir = attempt_result.new_circuit_ir
 
             if not attempt_result.success or metrics_i is None:
                 metrics_payload = {k: v.value for k, v in metrics_i.values.items()} if metrics_i else {}
-                history.append(
+                prepared.history.append(
                     {
                         "iteration": idx,
                         "candidate": dict(candidate),
@@ -432,19 +533,19 @@ class GridSearchStrategy(Strategy):
                         "attempts": attempts,
                     }
                 )
-                record_history_entry(recorder, history[-1])
+                record_history_entry(prepared.recorder, prepared.history[-1])
                 continue
 
             eval_i = evaluate_metrics(spec, metrics_i)
-            improved = eval_i["score"] < best_score - 1e-12
+            improved = eval_i["score"] < state.best_score - 1e-12
             if improved:
-                best_score = eval_i["score"]
-                best_metrics = metrics_i
-                best_source = new_source
-                best_all_pass = eval_i["all_pass"]
-                best_iter = idx
+                state.best_score = eval_i["score"]
+                state.best_metrics = metrics_i
+                state.best_source = new_source
+                state.best_all_pass = eval_i["all_pass"]
+                state.best_iter = idx
 
-            history.append(
+            prepared.history.append(
                 {
                     "iteration": idx,
                     "candidate": dict(candidate),
@@ -463,7 +564,7 @@ class GridSearchStrategy(Strategy):
                     "attempts": attempts,
                 }
             )
-            record_history_entry(recorder, history[-1])
+            record_history_entry(prepared.recorder, prepared.history[-1])
 
             losses = objective_losses(eval_i)
             candidate_entry = {
@@ -477,51 +578,107 @@ class GridSearchStrategy(Strategy):
             candidate_entries.append(candidate_entry)
             candidate_losses.append(losses)
 
-            if stop_on_first_pass and eval_i["all_pass"]:
+            if prepared.stop_on_first_pass and eval_i["all_pass"]:
                 stop_reason = StopReason.reached_target
                 break
 
         if stop_reason is None:
             stop_reason = StopReason.max_iterations
 
-        if recorder is not None:
-            top_entries = top_k(candidate_entries, top_k_count)
+        return candidate_entries, candidate_losses, stop_reason, state
+
+    def _write_report_and_finalize(
+        self,
+        prepared: _GridPrepared,
+        state: _GridState,
+        stop_reason: StopReason | None,
+        baseline_eval: dict[str, Any],
+        baseline_metrics: MetricsBundle,
+        candidate_entries: list[dict[str, Any]],
+        candidate_losses: list[list[float]],
+        param_value_errors: list[str],
+    ) -> RunResult:
+        if prepared.recorder is not None:
+            top_entries = top_k(candidate_entries, prepared.top_k_count)
             pareto_idx = pareto_front(candidate_losses)
             pareto_entries = [candidate_entries[i] for i in pareto_idx] if pareto_idx else []
-            recorder.write_json("search/topk.json", top_entries)
-            recorder.write_json("search/pareto.json", pareto_entries)
+            prepared.recorder.write_json("search/topk.json", top_entries)
+            prepared.recorder.write_json("search/pareto.json", pareto_entries)
             report_lines = _build_report(
-                cfg=cfg,
-                grid_cfg=grid_cfg,
-                baseline_eval=eval0,
-                baseline_metrics=baseline.metrics,
+                cfg=prepared.cfg,
+                grid_cfg=prepared.grid_cfg,
+                baseline_eval=baseline_eval,
+                baseline_metrics=baseline_metrics,
                 candidate_entries=candidate_entries,
                 pareto_entries=pareto_entries,
-                sim_runs_failed=sim_runs_failed,
+                sim_runs_failed=state.sim_runs_failed,
                 param_value_errors=param_value_errors,
             )
-            recorder.write_text("report.md", "\n".join(report_lines))
+            prepared.recorder.write_text("report.md", "\n".join(report_lines))
 
         recording_errors = finalize_run(
-            recorder=recorder,
-            manifest=manifest,
-            best_source=best_source,
-            best_metrics=best_metrics,
-            history=history,
+            recorder=prepared.recorder,
+            manifest=prepared.manifest,
+            best_source=state.best_source,
+            best_metrics=state.best_metrics,
+            history=prepared.history,
             stop_reason=stop_reason,
-            best_score=best_score,
-            best_iter=best_iter,
-            sim_runs=sim_runs,
-            sim_runs_ok=sim_runs_ok,
-            sim_runs_failed=sim_runs_failed,
+            best_score=state.best_score,
+            best_iter=state.best_iter,
+            sim_runs=state.sim_runs,
+            sim_runs_ok=state.sim_runs_ok,
+            sim_runs_failed=state.sim_runs_failed,
         )
 
         return RunResult(
-            best_source=best_source,
-            best_metrics=best_metrics,
-            history=history,
+            best_source=state.best_source,
+            best_metrics=state.best_metrics,
+            history=prepared.history,
             stop_reason=stop_reason,
-            notes={"best_score": best_score, "all_pass": best_all_pass, "recording_errors": recording_errors},
+            notes={"best_score": state.best_score, "all_pass": state.best_all_pass, "recording_errors": recording_errors},
+        )
+
+    def run(self, spec: CircuitSpec, source: CircuitSource, ctx: Any, cfg: StrategyConfig) -> RunResult:  # type: ignore[override]
+        prepared = self._prepare(spec, source, ctx, cfg)
+        baseline_out = self._baseline_phase(prepared, spec, ctx)
+        if baseline_out.result is not None:
+            return baseline_out.result
+
+        assert baseline_out.baseline is not None
+        assert baseline_out.eval0 is not None
+        assert baseline_out.state is not None
+
+        candidates_out = self._generate_candidates(prepared)
+
+        if baseline_out.stop_reason is StopReason.reached_target:
+            return self._write_report_and_finalize(
+                prepared=prepared,
+                state=baseline_out.state,
+                stop_reason=baseline_out.stop_reason,
+                baseline_eval=baseline_out.eval0,
+                baseline_metrics=baseline_out.baseline.metrics,
+                candidate_entries=[],
+                candidate_losses=[],
+                param_value_errors=candidates_out.param_value_errors,
+            )
+
+        candidate_entries, candidate_losses, stop_reason, state = self._evaluate_candidates_loop(
+            prepared=prepared,
+            spec=spec,
+            ctx=ctx,
+            state=baseline_out.state,
+            candidates=candidates_out.candidates,
+        )
+
+        return self._write_report_and_finalize(
+            prepared=prepared,
+            state=state,
+            stop_reason=stop_reason,
+            baseline_eval=baseline_out.eval0,
+            baseline_metrics=baseline_out.baseline.metrics,
+            candidate_entries=candidate_entries,
+            candidate_losses=candidate_losses,
+            param_value_errors=candidates_out.param_value_errors,
         )
 
 

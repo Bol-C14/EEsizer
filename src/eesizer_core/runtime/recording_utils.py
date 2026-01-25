@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+import json
 
 from ..contracts import CircuitSource, CircuitSpec, MetricsBundle, ParamSpace, Patch, StrategyConfig
 from ..contracts.enums import StopReason
@@ -124,6 +125,36 @@ def _collect_search_files(recorder: RunRecorder) -> list[str]:
     return sorted(files)
 
 
+def _prune_manifest_files(manifest: Any, run_dir: Path) -> None:
+    files = getattr(manifest, "files", None)
+    if not isinstance(files, dict):
+        return
+    cleaned: dict[str, Any] = {}
+    for key, value in files.items():
+        if isinstance(value, list):
+            kept = []
+            for item in value:
+                if not isinstance(item, str):
+                    continue
+                if (run_dir / item).exists():
+                    kept.append(item)
+            if kept:
+                cleaned[key] = kept
+            continue
+        if isinstance(value, str):
+            if (run_dir / value).exists():
+                cleaned[key] = value
+            continue
+        cleaned[key] = value
+    manifest.files = cleaned
+
+
+def write_manifest_json(manifest: Any, path: Path) -> None:
+    payload = manifest.to_dict() if hasattr(manifest, "to_dict") else manifest
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def _relativize_stage_map(stage_map: Mapping[str, str], recorder: RunRecorder | None) -> dict[str, str]:
     if recorder is None:
         return dict(stage_map)
@@ -233,11 +264,14 @@ def finalize_run(
             search_files = _collect_search_files(recorder)
             for rel_path in search_files:
                 manifest.files.setdefault(rel_path, rel_path)
+            _prune_manifest_files(manifest, recorder.run_dir)
         try:
             if recorder is not None:
                 recorder.write_json("run_manifest.json", manifest.to_dict())
             else:
-                manifest.save_json(Path(manifest.workspace) / "run_manifest.json")
+                run_dir = Path(manifest.workspace)
+                _prune_manifest_files(manifest, run_dir)
+                write_manifest_json(manifest, run_dir / "run_manifest.json")
         except Exception as exc:
             errors.append(f"manifest_write_failed: {exc}")
     return errors

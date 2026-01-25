@@ -6,7 +6,7 @@
 - Added a unit test to lock objective alias behavior.
 
 ## Files touched
-- Code: `src/eesizer_core/baselines/legacy_metrics_adapter.py`, `src/eesizer_core/strategies/objective_eval.py`
+- Code: `src/eesizer_core/baselines/legacy_metrics_adapter.py`, `src/eesizer_core/analysis/objective_eval.py`
 - Tests: `tests/test_step8_objective_alias_eval.py`
 
 ## Notes / Rationale

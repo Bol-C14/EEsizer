@@ -64,6 +64,7 @@ def test_grid_search_respects_explicit_param_ids(tmp_path):
                 "span_mul": 2.0,
                 "scale": "linear",
                 "param_ids": ["r1.value"],
+                "allow_param_ids_override_frozen": True,
             },
         },
     )
@@ -119,6 +120,7 @@ def test_corner_search_respects_explicit_param_ids(tmp_path):
                 "span_mul": 2.0,
                 "scale": "linear",
                 "param_ids": ["r1.value"],
+                "allow_param_ids_override_frozen": True,
             },
         },
     )

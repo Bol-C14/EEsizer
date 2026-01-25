@@ -51,7 +51,7 @@ def infer_param_space_from_ir(
     rules: Optional[ParamInferenceRules] = None,
 ) -> ParamSpace:
     """Construct a ParamSpace from CircuitIR.param_locs with optional rules."""
-    frozen = set(frozen_param_ids)
+    frozen = {str(param_id).lower() for param_id in frozen_param_ids}
     rules = rules or ParamInferenceRules()
     param_defs: List[ParamDef] = []
     for param_id in sorted(cir.param_locs.keys()):
@@ -66,7 +66,7 @@ def infer_param_space_from_ir(
                 unit=unit,
                 lower=lower,
                 upper=upper,
-                frozen=param_id in frozen,
+                frozen=param_id.lower() in frozen,
                 tags=(),
             )
         )

@@ -15,6 +15,7 @@ from ...contracts import (
     StrategyConfig,
 )
 from ...contracts.enums import PatchOpType, StopReason
+from ...contracts.errors import ValidationError
 from ...contracts.provenance import stable_hash_json, stable_hash_str
 from ...contracts.strategy import Strategy
 from ...domain.spice.params import ParamInferenceRules, infer_param_space_from_ir
@@ -54,6 +55,69 @@ from .measurement import (
     stage_tag_for_corner,
 )
 from .report import build_corner_report
+from .types import CornerSearchConfig
+
+
+@dataclass
+class _CornerPrepared:
+    history: list[dict[str, Any]]
+    recorder: RunRecorder | None
+    manifest: Any
+    cfg: StrategyConfig
+    source: CircuitSource
+    circuit_ir: Any
+    signature: str
+    param_space: Any
+    guard_cfg: dict[str, Any]
+    corner_cfg: CornerSearchConfig
+    corner_cfg_payload: dict[str, Any]
+    metric_groups: Mapping[Any, list[str]]
+    max_iters: int
+    max_sim_runs: int | None
+    candidate_budget: int
+    apply_opts: dict[str, Any]
+    attempt_ops: AttemptOperators
+
+
+@dataclass
+class _CornerBaselineOutcome:
+    result: RunResult | None
+    baseline: Any | None
+    eval0: dict[str, Any] | None
+
+
+@dataclass
+class _CornerParamSetup:
+    search_param_ids: list[str]
+    corner_param_ids: list[str]
+    baseline_values: dict[str, float]
+    corner_base_values: dict[str, float]
+    param_value_errors: list[str]
+    corner_set: dict[str, Any]
+    corner_defs: list[dict[str, Any]]
+    param_bounds: dict[str, Any]
+    candidates: list[dict[str, float]]
+
+
+@dataclass
+class _CornerState:
+    best_source: CircuitSource
+    best_metrics: MetricsBundle
+    best_score: float
+    best_all_pass: bool
+    best_iter: int
+    sim_runs: int
+    sim_runs_ok: int
+    sim_runs_failed: int
+
+
+@dataclass
+class _CornerBaselineSummary:
+    summary: dict[str, Any]
+    corner_results: list[dict[str, Any]]
+    baseline_corner_failed: bool
+    state: _CornerState
+    stop_reason: StopReason | None
 
 
 @dataclass
@@ -97,7 +161,13 @@ class CornerSearchStrategy(Strategy):
         if self.registry is None:
             self.registry = DEFAULT_REGISTRY
 
-    def run(self, spec: CircuitSpec, source: CircuitSource, ctx: Any, cfg: StrategyConfig) -> RunResult:  # type: ignore[override]
+    def _prepare(
+        self,
+        spec: CircuitSpec,
+        source: CircuitSource,
+        ctx: Any,
+        cfg: StrategyConfig,
+    ) -> _CornerPrepared:
         history: list[dict[str, Any]] = []
         recorder: RunRecorder | None = None
         manifest = None
@@ -197,6 +267,7 @@ class CornerSearchStrategy(Strategy):
             "corner_override_mode": corner_cfg.override_mode,
             "require_baseline_corner_pass": corner_cfg.require_baseline_corner_pass,
             "clamp_corner_overrides": corner_cfg.clamp_corner_overrides,
+            "allow_param_ids_override_frozen": corner_cfg.allow_param_ids_override_frozen,
         }
 
         max_iters = cfg.budget.max_iterations
@@ -205,133 +276,6 @@ class CornerSearchStrategy(Strategy):
 
         metric_names = [obj.metric for obj in spec.objectives]
         metric_groups = group_metric_names_by_kind(self.registry, metric_names)
-
-        baseline = run_baseline(
-            source=source,
-            spec=spec,
-            metric_groups=metric_groups,
-            ctx=ctx,
-            guard_cfg=guard_cfg,
-            max_retries=corner_cfg.baseline_retries,
-            max_sim_runs=max_sim_runs,
-            recorder=recorder,
-            manifest=manifest,
-            measure_fn=self.measure_fn,
-            deck_build_op=self.deck_build_op,
-            sim_run_op=self.sim_run_op,
-            metrics_op=self.metrics_op,
-            behavior_guard_op=self.behavior_guard_op,
-            guard_chain_op=self.guard_chain_op,
-        )
-
-        if not baseline.success:
-            history.append(
-                {
-                    "iteration": 0,
-                    "candidate": None,
-                    "patch": None,
-                    "signature_before": signature,
-                    "signature_after": signature,
-                    "metrics": {},
-                    "score": float("inf"),
-                    "all_pass": False,
-                    "improved": False,
-                    "objectives": [],
-                    "sim_stages": baseline.stage_map,
-                    "warnings": baseline.warnings,
-                    "errors": baseline.errors,
-                    "guard": guard_report_to_dict(baseline.guard_report) if baseline.guard_report else None,
-                    "attempts": baseline.attempts,
-                    "corners": [],
-                    "pass_rate": 0.0,
-                    "worst_score": float("inf"),
-                    "robust_losses": [],
-                    "worst_corner_id": None,
-                }
-            )
-            record_history_entry(recorder, history[-1])
-            recording_errors = finalize_run(
-                recorder=recorder,
-                manifest=manifest,
-                best_source=source,
-                best_metrics=MetricsBundle(),
-                history=history,
-                stop_reason=baseline.stop_reason,
-                best_score=float("inf"),
-                best_iter=None,
-                sim_runs=baseline.sim_runs,
-                sim_runs_ok=baseline.sim_runs_ok,
-                sim_runs_failed=baseline.sim_runs_failed,
-            )
-            return RunResult(
-                best_source=source,
-                best_metrics=MetricsBundle(),
-                history=history,
-                stop_reason=baseline.stop_reason,
-                notes={
-                    "best_score": float("inf"),
-                    "all_pass": False,
-                    "recording_errors": recording_errors,
-                },
-            )
-
-        eval0 = evaluate_metrics(spec, baseline.metrics)
-
-        search_param_ids = corner_cfg.search_param_ids
-        if search_param_ids is None:
-            search_param_ids = [p.param_id for p in param_space.params if not p.frozen]
-        corner_param_ids = corner_cfg.corner_param_ids
-        if corner_param_ids is None:
-            corner_param_ids = list(search_param_ids)
-
-        search_param_ids = [pid.lower() for pid in search_param_ids]
-        corner_param_ids = [pid.lower() for pid in corner_param_ids]
-
-        baseline_values, param_value_errors = extract_param_values(circuit_ir, param_ids=search_param_ids)
-        corner_base_values, corner_value_errors = extract_param_values(circuit_ir, param_ids=corner_param_ids)
-        if corner_value_errors:
-            param_value_errors.extend(corner_value_errors)
-
-        corner_set = build_corner_set(
-            param_space=param_space,
-            nominal_values=corner_base_values,
-            span_mul=corner_cfg.span_mul,
-            corner_param_ids=corner_param_ids,
-            include_global_corners=corner_cfg.include_global_corners,
-            override_mode=corner_cfg.override_mode,
-            mode=corner_cfg.corner_mode,
-        )
-        corner_set["search_param_ids"] = list(search_param_ids)
-        corner_set["corner_param_ids"] = list(corner_param_ids)
-        if recorder is not None:
-            recorder.write_json("search/corner_set.json", corner_set)
-
-        per_param_levels: dict[str, list[float]] = {}
-        for param_id in search_param_ids:
-            if param_id not in baseline_values:
-                continue
-            param_def = param_space.get(param_id)
-            if param_def is None:
-                continue
-            per_param_levels[param_id] = make_levels(
-                nominal=baseline_values[param_id],
-                lower=param_def.lower,
-                upper=param_def.upper,
-                levels=corner_cfg.levels,
-                span_mul=corner_cfg.span_mul,
-                scale=corner_cfg.scale,
-            )
-
-        if corner_cfg.mode == "factorial":
-            candidates = factorial_candidates(search_param_ids, per_param_levels, baseline_values)
-        else:
-            candidates = coordinate_candidates(search_param_ids, per_param_levels, baseline_values)
-
-        if candidate_budget and len(candidates) > candidate_budget:
-            candidates = candidates[:candidate_budget]
-
-        if recorder is not None:
-            recorder.write_json("search/candidates.json", candidates)
 
         validation_opts = {
             "wl_ratio_min": guard_cfg.get("wl_ratio_min"),
@@ -355,9 +299,219 @@ class CornerSearchStrategy(Strategy):
             metrics_op=self.metrics_op,
         )
 
-        sim_runs = baseline.sim_runs
-        sim_runs_ok = baseline.sim_runs_ok
-        sim_runs_failed = baseline.sim_runs_failed
+        return _CornerPrepared(
+            history=history,
+            recorder=recorder,
+            manifest=manifest,
+            cfg=cfg,
+            source=source,
+            circuit_ir=circuit_ir,
+            signature=signature,
+            param_space=param_space,
+            guard_cfg=guard_cfg,
+            corner_cfg=corner_cfg,
+            corner_cfg_payload=corner_cfg_payload,
+            metric_groups=metric_groups,
+            max_iters=max_iters,
+            max_sim_runs=max_sim_runs,
+            candidate_budget=candidate_budget,
+            apply_opts=apply_opts,
+            attempt_ops=attempt_ops,
+        )
+
+    def _baseline_phase(
+        self,
+        prepared: _CornerPrepared,
+        spec: CircuitSpec,
+        ctx: Any,
+    ) -> _CornerBaselineOutcome:
+        baseline = run_baseline(
+            source=prepared.source,
+            spec=spec,
+            metric_groups=prepared.metric_groups,
+            ctx=ctx,
+            guard_cfg=prepared.guard_cfg,
+            max_retries=prepared.corner_cfg.baseline_retries,
+            max_sim_runs=prepared.max_sim_runs,
+            recorder=prepared.recorder,
+            manifest=prepared.manifest,
+            measure_fn=self.measure_fn,
+            deck_build_op=self.deck_build_op,
+            sim_run_op=self.sim_run_op,
+            metrics_op=self.metrics_op,
+            behavior_guard_op=self.behavior_guard_op,
+            guard_chain_op=self.guard_chain_op,
+        )
+
+        if not baseline.success:
+            prepared.history.append(
+                {
+                    "iteration": 0,
+                    "candidate": None,
+                    "patch": None,
+                    "signature_before": prepared.signature,
+                    "signature_after": prepared.signature,
+                    "metrics": {},
+                    "score": float("inf"),
+                    "all_pass": False,
+                    "improved": False,
+                    "objectives": [],
+                    "sim_stages": baseline.stage_map,
+                    "warnings": baseline.warnings,
+                    "errors": baseline.errors,
+                    "guard": guard_report_to_dict(baseline.guard_report) if baseline.guard_report else None,
+                    "attempts": baseline.attempts,
+                    "corners": [],
+                    "pass_rate": 0.0,
+                    "worst_score": float("inf"),
+                    "robust_losses": [],
+                    "worst_corner_id": None,
+                }
+            )
+            record_history_entry(prepared.recorder, prepared.history[-1])
+            recording_errors = finalize_run(
+                recorder=prepared.recorder,
+                manifest=prepared.manifest,
+                best_source=prepared.source,
+                best_metrics=MetricsBundle(),
+                history=prepared.history,
+                stop_reason=baseline.stop_reason,
+                best_score=float("inf"),
+                best_iter=None,
+                sim_runs=baseline.sim_runs,
+                sim_runs_ok=baseline.sim_runs_ok,
+                sim_runs_failed=baseline.sim_runs_failed,
+            )
+            return _CornerBaselineOutcome(
+                result=RunResult(
+                    best_source=prepared.source,
+                    best_metrics=MetricsBundle(),
+                    history=prepared.history,
+                    stop_reason=baseline.stop_reason,
+                    notes={
+                        "best_score": float("inf"),
+                        "all_pass": False,
+                        "recording_errors": recording_errors,
+                    },
+                ),
+                baseline=None,
+                eval0=None,
+            )
+
+        eval0 = evaluate_metrics(spec, baseline.metrics)
+        return _CornerBaselineOutcome(result=None, baseline=baseline, eval0=eval0)
+
+    def _resolve_param_ids(self, prepared: _CornerPrepared) -> tuple[list[str], list[str]]:
+        search_param_ids = prepared.corner_cfg.search_param_ids
+        if search_param_ids is None:
+            search_param_ids = [p.param_id for p in prepared.param_space.params if not p.frozen]
+        corner_param_ids = prepared.corner_cfg.corner_param_ids
+        if corner_param_ids is None:
+            corner_param_ids = list(search_param_ids)
+
+        search_param_ids = [pid.lower() for pid in search_param_ids]
+        corner_param_ids = [pid.lower() for pid in corner_param_ids]
+
+        frozen_conflicts: list[str] = []
+        for pid in search_param_ids:
+            param_def = prepared.param_space.get(pid)
+            if param_def is not None and param_def.frozen:
+                frozen_conflicts.append(pid)
+        for pid in corner_param_ids:
+            param_def = prepared.param_space.get(pid)
+            if param_def is not None and param_def.frozen:
+                frozen_conflicts.append(pid)
+        if frozen_conflicts and not prepared.corner_cfg.allow_param_ids_override_frozen:
+            raise ValidationError(
+                "corner_search param_ids include frozen params: "
+                f"{', '.join(sorted(set(frozen_conflicts)))}; set allow_param_ids_override_frozen=true to override"
+            )
+
+        return search_param_ids, corner_param_ids
+
+    def _build_corner_setup(self, prepared: _CornerPrepared) -> _CornerParamSetup:
+        search_param_ids, corner_param_ids = self._resolve_param_ids(prepared)
+
+        baseline_values, param_value_errors = extract_param_values(prepared.circuit_ir, param_ids=search_param_ids)
+        corner_base_values, corner_value_errors = extract_param_values(prepared.circuit_ir, param_ids=corner_param_ids)
+        if corner_value_errors:
+            param_value_errors.extend(corner_value_errors)
+
+        corner_set = build_corner_set(
+            param_space=prepared.param_space,
+            nominal_values=corner_base_values,
+            span_mul=prepared.corner_cfg.span_mul,
+            corner_param_ids=corner_param_ids,
+            include_global_corners=prepared.corner_cfg.include_global_corners,
+            override_mode=prepared.corner_cfg.override_mode,
+            mode=prepared.corner_cfg.corner_mode,
+        )
+        corner_set["search_param_ids"] = list(search_param_ids)
+        corner_set["corner_param_ids"] = list(corner_param_ids)
+        if prepared.recorder is not None:
+            prepared.recorder.write_json("search/corner_set.json", corner_set)
+
+        per_param_levels: dict[str, list[float]] = {}
+        for param_id in search_param_ids:
+            if param_id not in baseline_values:
+                continue
+            param_def = prepared.param_space.get(param_id)
+            if param_def is None:
+                continue
+            per_param_levels[param_id] = make_levels(
+                nominal=baseline_values[param_id],
+                lower=param_def.lower,
+                upper=param_def.upper,
+                levels=prepared.corner_cfg.levels,
+                span_mul=prepared.corner_cfg.span_mul,
+                scale=prepared.corner_cfg.scale,
+            )
+
+        if prepared.corner_cfg.mode == "factorial":
+            candidates = factorial_candidates(search_param_ids, per_param_levels, baseline_values)
+        else:
+            candidates = coordinate_candidates(search_param_ids, per_param_levels, baseline_values)
+
+        if prepared.candidate_budget and len(candidates) > prepared.candidate_budget:
+            candidates = candidates[: prepared.candidate_budget]
+
+        if prepared.recorder is not None:
+            prepared.recorder.write_json("search/candidates.json", candidates)
+
+        corner_defs = corner_set.get("corners", []) or []
+        param_bounds = corner_set.get("param_bounds", {})
+
+        return _CornerParamSetup(
+            search_param_ids=search_param_ids,
+            corner_param_ids=corner_param_ids,
+            baseline_values=baseline_values,
+            corner_base_values=corner_base_values,
+            param_value_errors=param_value_errors,
+            corner_set=corner_set,
+            corner_defs=corner_defs,
+            param_bounds=param_bounds,
+            candidates=candidates,
+        )
+
+    def _evaluate_baseline_corners(
+        self,
+        prepared: _CornerPrepared,
+        setup: _CornerParamSetup,
+        spec: CircuitSpec,
+        ctx: Any,
+        baseline: Any,
+        eval0: dict[str, Any],
+    ) -> _CornerBaselineSummary:
+        state = _CornerState(
+            best_source=prepared.source,
+            best_metrics=baseline.metrics,
+            best_score=eval0["score"],
+            best_all_pass=eval0["all_pass"],
+            best_iter=0,
+            sim_runs=baseline.sim_runs,
+            sim_runs_ok=baseline.sim_runs_ok,
+            sim_runs_failed=baseline.sim_runs_failed,
+        )
 
         corner_results: list[dict[str, Any]] = []
         corner_results.append(
@@ -370,20 +524,18 @@ class CornerSearchStrategy(Strategy):
                 warnings=baseline.warnings,
                 errors=baseline.errors,
                 guard_report=baseline.guard_report,
-                recorder=recorder,
+                recorder=prepared.recorder,
             )
         )
 
         stop_reason: StopReason | None = None
         baseline_corner_failed = False
-        corner_defs = corner_set.get("corners", []) or []
-        param_bounds = corner_set.get("param_bounds", {})
 
-        for corner in corner_defs:
+        for corner in setup.corner_defs:
             corner_id = str(corner.get("corner_id", "corner"))
             if corner_id == "nominal":
                 continue
-            if max_sim_runs is not None and sim_runs >= max_sim_runs:
+            if prepared.max_sim_runs is not None and state.sim_runs >= prepared.max_sim_runs:
                 stop_reason = StopReason.budget_exhausted
                 baseline_corner_failed = True
                 corner_results.append(
@@ -396,7 +548,7 @@ class CornerSearchStrategy(Strategy):
                         warnings=[],
                         errors=["budget_exhausted"],
                         guard_report=None,
-                        recorder=recorder,
+                        recorder=prepared.recorder,
                     )
                 )
                 break
@@ -405,10 +557,10 @@ class CornerSearchStrategy(Strategy):
             if not isinstance(overrides, Mapping):
                 overrides = {}
             applied, override_errors, override_warnings = resolve_corner_overrides(
-                base_values=corner_base_values,
-                param_bounds=param_bounds,
+                base_values=setup.corner_base_values,
+                param_bounds=setup.param_bounds,
                 overrides=overrides,
-                clamp=corner_cfg.clamp_corner_overrides,
+                clamp=prepared.corner_cfg.clamp_corner_overrides,
             )
             if override_errors:
                 baseline_corner_failed = True
@@ -422,7 +574,7 @@ class CornerSearchStrategy(Strategy):
                         warnings=override_warnings,
                         errors=override_errors,
                         guard_report=None,
-                        recorder=recorder,
+                        recorder=prepared.recorder,
                     )
                 )
                 continue
@@ -432,24 +584,24 @@ class CornerSearchStrategy(Strategy):
                 iter_idx=0,
                 attempt=0,
                 patch=corner_patch,
-                cur_source=source,
-                cur_signature=signature,
-                circuit_ir=circuit_ir,
-                param_space=param_space,
+                cur_source=prepared.source,
+                cur_signature=prepared.signature,
+                circuit_ir=prepared.circuit_ir,
+                param_space=prepared.param_space,
                 spec=spec,
-                guard_cfg=guard_cfg,
-                apply_opts=apply_opts,
-                metric_groups=metric_groups,
+                guard_cfg=prepared.guard_cfg,
+                apply_opts=prepared.apply_opts,
+                metric_groups=prepared.metric_groups,
                 ctx=ctx,
-                recorder=recorder,
-                manifest=manifest,
+                recorder=prepared.recorder,
+                manifest=prepared.manifest,
                 measure_fn=self.measure_fn,
-                ops=attempt_ops,
+                ops=prepared.attempt_ops,
                 stage_tag=stage_tag_for_corner(corner_id),
             )
-            sim_runs += corner_attempt.sim_runs
-            sim_runs_ok += corner_attempt.sim_runs_ok
-            sim_runs_failed += corner_attempt.sim_runs_failed
+            state.sim_runs += corner_attempt.sim_runs
+            state.sim_runs_ok += corner_attempt.sim_runs_ok
+            state.sim_runs_failed += corner_attempt.sim_runs_failed
 
             if not corner_attempt.success:
                 baseline_corner_failed = True
@@ -468,38 +620,35 @@ class CornerSearchStrategy(Strategy):
                     warnings=override_warnings + corner_attempt.warnings,
                     errors=override_errors + corner_attempt.guard_failures,
                     guard_report=corner_attempt.guard_report,
-                    recorder=recorder,
+                    recorder=prepared.recorder,
                 )
             )
 
         summary0 = aggregate_corner_results(corner_results)
         worst_entry = pick_corner(corner_results, corner_id=summary0.get("worst_corner_id"), worst=True)
-        best_entry = pick_corner(corner_results, worst=False)
-        nominal_entry = pick_corner(corner_results, corner_id="nominal", worst=False)
         worst_metrics = worst_entry.get("metrics") if worst_entry else {}
         worst_objectives = worst_entry.get("objectives") if worst_entry else []
         worst_stage_map = worst_entry.get("sim_stages") if worst_entry else {}
         worst_warnings = worst_entry.get("warnings") if worst_entry else []
         worst_errors = worst_entry.get("errors") if worst_entry else []
 
-        best_source = source
-        best_metrics = baseline.metrics
-        best_score = summary0["worst_score"]
-        best_all_pass = summary0["pass_rate"] == 1.0
-        best_iter = 0
-        if best_all_pass:
+        state.best_score = summary0["worst_score"]
+        state.best_all_pass = summary0["pass_rate"] == 1.0
+        state.best_iter = 0
+
+        if state.best_all_pass:
             stop_reason = StopReason.reached_target
 
-        history.append(
+        prepared.history.append(
             {
                 "iteration": 0,
                 "candidate": None,
                 "patch": None,
-                "signature_before": signature,
-                "signature_after": signature,
+                "signature_before": prepared.signature,
+                "signature_after": prepared.signature,
                 "metrics": worst_metrics,
                 "score": summary0["worst_score"],
-                "all_pass": best_all_pass,
+                "all_pass": state.best_all_pass,
                 "improved": False,
                 "objectives": worst_objectives,
                 "sim_stages": worst_stage_map,
@@ -511,80 +660,30 @@ class CornerSearchStrategy(Strategy):
                 **summary0,
             }
         )
-        record_history_entry(recorder, history[-1])
+        record_history_entry(prepared.recorder, prepared.history[-1])
 
-        if stop_reason is StopReason.budget_exhausted:
-            recording_errors = finalize_run(
-                recorder=recorder,
-                manifest=manifest,
-                best_source=best_source,
-                best_metrics=best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                best_score=best_score,
-                best_iter=best_iter,
-                sim_runs=sim_runs,
-                sim_runs_ok=sim_runs_ok,
-                sim_runs_failed=sim_runs_failed,
-            )
-            return RunResult(
-                best_source=best_source,
-                best_metrics=best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                notes={"best_score": best_score, "all_pass": best_all_pass, "recording_errors": recording_errors},
-            )
+        return _CornerBaselineSummary(
+            summary=summary0,
+            corner_results=corner_results,
+            baseline_corner_failed=baseline_corner_failed,
+            state=state,
+            stop_reason=stop_reason,
+        )
 
-        if corner_cfg.require_baseline_corner_pass and baseline_corner_failed:
-            stop_reason = StopReason.guard_failed
-            recording_errors = finalize_run(
-                recorder=recorder,
-                manifest=manifest,
-                best_source=best_source,
-                best_metrics=best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                best_score=best_score,
-                best_iter=best_iter,
-                sim_runs=sim_runs,
-                sim_runs_ok=sim_runs_ok,
-                sim_runs_failed=sim_runs_failed,
-            )
-            return RunResult(
-                best_source=best_source,
-                best_metrics=best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                notes={"best_score": best_score, "all_pass": best_all_pass, "recording_errors": recording_errors},
-            )
-
-        if stop_reason is StopReason.reached_target:
-            recording_errors = finalize_run(
-                recorder=recorder,
-                manifest=manifest,
-                best_source=best_source,
-                best_metrics=best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                best_score=best_score,
-                best_iter=best_iter,
-                sim_runs=sim_runs,
-                sim_runs_ok=sim_runs_ok,
-                sim_runs_failed=sim_runs_failed,
-            )
-            return RunResult(
-                best_source=best_source,
-                best_metrics=best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                notes={"best_score": best_score, "all_pass": best_all_pass, "recording_errors": recording_errors},
-            )
-
+    def _evaluate_candidates_loop(
+        self,
+        prepared: _CornerPrepared,
+        setup: _CornerParamSetup,
+        spec: CircuitSpec,
+        ctx: Any,
+        state: _CornerState,
+    ) -> tuple[list[dict[str, Any]], list[list[float]], StopReason, _CornerState]:
         candidate_entries: list[dict[str, Any]] = []
         candidate_losses: list[list[float]] = []
+        stop_reason: StopReason | None = None
 
-        for idx, candidate in enumerate(candidates, start=1):
-            if max_sim_runs is not None and sim_runs >= max_sim_runs:
+        for idx, candidate in enumerate(setup.candidates, start=1):
+            if prepared.max_sim_runs is not None and state.sim_runs >= prepared.max_sim_runs:
                 stop_reason = StopReason.budget_exhausted
                 break
 
@@ -593,30 +692,30 @@ class CornerSearchStrategy(Strategy):
                 for pid, val in candidate.items()
             ]
             patch = Patch(ops=tuple(patch_ops))
-            signature_before = signature
+            signature_before = prepared.signature
 
             attempt_result = run_attempt(
                 iter_idx=idx,
                 attempt=0,
                 patch=patch,
-                cur_source=source,
-                cur_signature=signature,
-                circuit_ir=circuit_ir,
-                param_space=param_space,
+                cur_source=prepared.source,
+                cur_signature=prepared.signature,
+                circuit_ir=prepared.circuit_ir,
+                param_space=prepared.param_space,
                 spec=spec,
-                guard_cfg=guard_cfg,
-                apply_opts=apply_opts,
-                metric_groups=metric_groups,
+                guard_cfg=prepared.guard_cfg,
+                apply_opts=prepared.apply_opts,
+                metric_groups=prepared.metric_groups,
                 ctx=ctx,
-                recorder=recorder,
-                manifest=manifest,
+                recorder=prepared.recorder,
+                manifest=prepared.manifest,
                 measure_fn=self.measure_fn,
-                ops=attempt_ops,
+                ops=prepared.attempt_ops,
                 stage_tag=stage_tag_for_corner("nominal"),
             )
-            sim_runs += attempt_result.sim_runs
-            sim_runs_ok += attempt_result.sim_runs_ok
-            sim_runs_failed += attempt_result.sim_runs_failed
+            state.sim_runs += attempt_result.sim_runs
+            state.sim_runs_ok += attempt_result.sim_runs_ok
+            state.sim_runs_failed += attempt_result.sim_runs_failed
 
             corner_results = []
             candidate_errors: list[str] = []
@@ -635,7 +734,7 @@ class CornerSearchStrategy(Strategy):
                     warnings=attempt_result.warnings,
                     errors=attempt_result.guard_failures,
                     guard_report=attempt_result.guard_report,
-                    recorder=recorder,
+                    recorder=prepared.recorder,
                 )
             )
 
@@ -648,7 +747,7 @@ class CornerSearchStrategy(Strategy):
                 worst_warnings = worst_entry.get("warnings") if worst_entry else []
                 worst_errors = worst_entry.get("errors") if worst_entry else attempt_result.guard_failures
 
-                history.append(
+                prepared.history.append(
                     {
                         "iteration": idx,
                         "candidate": dict(candidate),
@@ -679,22 +778,22 @@ class CornerSearchStrategy(Strategy):
                         **summary,
                     }
                 )
-                record_history_entry(recorder, history[-1])
+                record_history_entry(prepared.recorder, prepared.history[-1])
                 continue
 
             candidate_base_values, candidate_value_errors = extract_param_values(
                 attempt_result.new_circuit_ir,
-                param_ids=corner_param_ids,
+                param_ids=setup.corner_param_ids,
             )
             if candidate_value_errors:
                 candidate_errors.extend(candidate_value_errors)
 
             candidate_ok = True
-            for corner in corner_defs:
+            for corner in setup.corner_defs:
                 corner_id = str(corner.get("corner_id", "corner"))
                 if corner_id == "nominal":
                     continue
-                if max_sim_runs is not None and sim_runs >= max_sim_runs:
+                if prepared.max_sim_runs is not None and state.sim_runs >= prepared.max_sim_runs:
                     stop_reason = StopReason.budget_exhausted
                     candidate_ok = False
                     corner_results.append(
@@ -707,7 +806,7 @@ class CornerSearchStrategy(Strategy):
                             warnings=[],
                             errors=["budget_exhausted"],
                             guard_report=None,
-                            recorder=recorder,
+                            recorder=prepared.recorder,
                         )
                     )
                     break
@@ -717,9 +816,9 @@ class CornerSearchStrategy(Strategy):
                     overrides = {}
                 applied, override_errors, override_warnings = resolve_corner_overrides(
                     base_values=candidate_base_values,
-                    param_bounds=param_bounds,
+                    param_bounds=setup.param_bounds,
                     overrides=overrides,
-                    clamp=corner_cfg.clamp_corner_overrides,
+                    clamp=prepared.corner_cfg.clamp_corner_overrides,
                 )
                 if override_errors:
                     candidate_ok = False
@@ -734,7 +833,7 @@ class CornerSearchStrategy(Strategy):
                             warnings=override_warnings,
                             errors=override_errors,
                             guard_report=None,
-                            recorder=recorder,
+                            recorder=prepared.recorder,
                         )
                     )
                     break
@@ -747,21 +846,21 @@ class CornerSearchStrategy(Strategy):
                     cur_source=attempt_result.new_source,
                     cur_signature=attempt_result.new_signature,
                     circuit_ir=attempt_result.new_circuit_ir,
-                    param_space=param_space,
+                    param_space=prepared.param_space,
                     spec=spec,
-                    guard_cfg=guard_cfg,
-                    apply_opts=apply_opts,
-                    metric_groups=metric_groups,
+                    guard_cfg=prepared.guard_cfg,
+                    apply_opts=prepared.apply_opts,
+                    metric_groups=prepared.metric_groups,
                     ctx=ctx,
-                    recorder=recorder,
-                    manifest=manifest,
+                    recorder=prepared.recorder,
+                    manifest=prepared.manifest,
                     measure_fn=self.measure_fn,
-                    ops=attempt_ops,
+                    ops=prepared.attempt_ops,
                     stage_tag=stage_tag_for_corner(corner_id),
                 )
-                sim_runs += corner_attempt.sim_runs
-                sim_runs_ok += corner_attempt.sim_runs_ok
-                sim_runs_failed += corner_attempt.sim_runs_failed
+                state.sim_runs += corner_attempt.sim_runs
+                state.sim_runs_ok += corner_attempt.sim_runs_ok
+                state.sim_runs_failed += corner_attempt.sim_runs_failed
 
                 if not corner_attempt.success:
                     candidate_ok = False
@@ -780,7 +879,7 @@ class CornerSearchStrategy(Strategy):
                         warnings=override_warnings + corner_attempt.warnings,
                         errors=override_errors + corner_attempt.guard_failures,
                         guard_report=corner_attempt.guard_report,
-                        recorder=recorder,
+                        recorder=prepared.recorder,
                     )
                 )
                 if not candidate_ok:
@@ -796,15 +895,15 @@ class CornerSearchStrategy(Strategy):
             worst_warnings = worst_entry.get("warnings") if worst_entry else []
             worst_errors = worst_entry.get("errors") if worst_entry else candidate_errors
 
-            improved = candidate_ok and summary["worst_score"] < best_score - 1e-12
+            improved = candidate_ok and summary["worst_score"] < state.best_score - 1e-12
             if improved:
-                best_score = summary["worst_score"]
-                best_metrics = attempt_result.metrics if attempt_result.metrics is not None else best_metrics
-                best_source = attempt_result.new_source
-                best_all_pass = summary["pass_rate"] == 1.0
-                best_iter = idx
+                state.best_score = summary["worst_score"]
+                state.best_metrics = attempt_result.metrics if attempt_result.metrics is not None else state.best_metrics
+                state.best_source = attempt_result.new_source
+                state.best_all_pass = summary["pass_rate"] == 1.0
+                state.best_iter = idx
 
-            history.append(
+            prepared.history.append(
                 {
                     "iteration": idx,
                     "candidate": dict(candidate),
@@ -835,7 +934,7 @@ class CornerSearchStrategy(Strategy):
                     **summary,
                 }
             )
-            record_history_entry(recorder, history[-1])
+            record_history_entry(prepared.recorder, prepared.history[-1])
 
             if candidate_ok:
                 candidate_entry = {
@@ -856,50 +955,125 @@ class CornerSearchStrategy(Strategy):
 
             if stop_reason is StopReason.budget_exhausted:
                 break
-            if corner_cfg.stop_on_first_pass and summary["pass_rate"] == 1.0:
+            if prepared.corner_cfg.stop_on_first_pass and summary["pass_rate"] == 1.0:
                 stop_reason = StopReason.reached_target
                 break
 
         if stop_reason is None:
             stop_reason = StopReason.max_iterations
 
-        if recorder is not None:
-            top_entries = top_k(candidate_entries, corner_cfg.top_k)
-            pareto_idx = pareto_front(candidate_losses)
-            pareto_entries = [candidate_entries[i] for i in pareto_idx] if pareto_idx else []
-            recorder.write_json("search/topk.json", top_entries)
-            recorder.write_json("search/pareto.json", pareto_entries)
-            report_lines = build_corner_report(
-                cfg=cfg,
-                corner_cfg=corner_cfg_payload,
-                baseline_eval=eval0,
-                baseline_metrics=baseline.metrics,
-                baseline_summary=summary0,
-                candidate_entries=candidate_entries,
-                pareto_entries=pareto_entries,
-                sim_runs_failed=sim_runs_failed,
-                param_value_errors=param_value_errors,
-            )
-            recorder.write_text("report.md", "\n".join(report_lines))
+        return candidate_entries, candidate_losses, stop_reason, state
 
+    def _finalize(
+        self,
+        prepared: _CornerPrepared,
+        state: _CornerState,
+        stop_reason: StopReason,
+    ) -> RunResult:
         recording_errors = finalize_run(
-            recorder=recorder,
-            manifest=manifest,
-            best_source=best_source,
-            best_metrics=best_metrics,
-            history=history,
+            recorder=prepared.recorder,
+            manifest=prepared.manifest,
+            best_source=state.best_source,
+            best_metrics=state.best_metrics,
+            history=prepared.history,
             stop_reason=stop_reason,
-            best_score=best_score,
-            best_iter=best_iter,
-            sim_runs=sim_runs,
-            sim_runs_ok=sim_runs_ok,
-            sim_runs_failed=sim_runs_failed,
+            best_score=state.best_score,
+            best_iter=state.best_iter,
+            sim_runs=state.sim_runs,
+            sim_runs_ok=state.sim_runs_ok,
+            sim_runs_failed=state.sim_runs_failed,
         )
 
         return RunResult(
-            best_source=best_source,
-            best_metrics=best_metrics,
-            history=history,
+            best_source=state.best_source,
+            best_metrics=state.best_metrics,
+            history=prepared.history,
             stop_reason=stop_reason,
-            notes={"best_score": best_score, "all_pass": best_all_pass, "recording_errors": recording_errors},
+            notes={
+                "best_score": state.best_score,
+                "all_pass": state.best_all_pass,
+                "recording_errors": recording_errors,
+            },
+        )
+
+    def _write_report_and_finalize(
+        self,
+        prepared: _CornerPrepared,
+        state: _CornerState,
+        stop_reason: StopReason,
+        baseline_eval: dict[str, Any],
+        baseline_metrics: MetricsBundle,
+        baseline_summary: dict[str, Any],
+        candidate_entries: list[dict[str, Any]],
+        candidate_losses: list[list[float]],
+        param_value_errors: list[str],
+    ) -> RunResult:
+        if prepared.recorder is not None:
+            top_entries = top_k(candidate_entries, prepared.corner_cfg.top_k)
+            pareto_idx = pareto_front(candidate_losses)
+            pareto_entries = [candidate_entries[i] for i in pareto_idx] if pareto_idx else []
+            prepared.recorder.write_json("search/topk.json", top_entries)
+            prepared.recorder.write_json("search/pareto.json", pareto_entries)
+            report_lines = build_corner_report(
+                cfg=prepared.cfg,
+                corner_cfg=prepared.corner_cfg_payload,
+                baseline_eval=baseline_eval,
+                baseline_metrics=baseline_metrics,
+                baseline_summary=baseline_summary,
+                candidate_entries=candidate_entries,
+                pareto_entries=pareto_entries,
+                sim_runs_failed=state.sim_runs_failed,
+                param_value_errors=param_value_errors,
+            )
+            prepared.recorder.write_text("report.md", "\n".join(report_lines))
+
+        return self._finalize(prepared, state, stop_reason)
+
+    def run(self, spec: CircuitSpec, source: CircuitSource, ctx: Any, cfg: StrategyConfig) -> RunResult:  # type: ignore[override]
+        prepared = self._prepare(spec, source, ctx, cfg)
+        baseline_out = self._baseline_phase(prepared, spec, ctx)
+        if baseline_out.result is not None:
+            return baseline_out.result
+
+        assert baseline_out.baseline is not None
+        assert baseline_out.eval0 is not None
+
+        setup = self._build_corner_setup(prepared)
+        baseline_summary = self._evaluate_baseline_corners(
+            prepared=prepared,
+            setup=setup,
+            spec=spec,
+            ctx=ctx,
+            baseline=baseline_out.baseline,
+            eval0=baseline_out.eval0,
+        )
+        state = baseline_summary.state
+
+        if baseline_summary.stop_reason is StopReason.budget_exhausted:
+            return self._finalize(prepared, state, baseline_summary.stop_reason)
+
+        if prepared.corner_cfg.require_baseline_corner_pass and baseline_summary.baseline_corner_failed:
+            return self._finalize(prepared, state, StopReason.guard_failed)
+
+        if baseline_summary.stop_reason is StopReason.reached_target:
+            return self._finalize(prepared, state, baseline_summary.stop_reason)
+
+        candidate_entries, candidate_losses, stop_reason, state = self._evaluate_candidates_loop(
+            prepared=prepared,
+            setup=setup,
+            spec=spec,
+            ctx=ctx,
+            state=state,
+        )
+
+        return self._write_report_and_finalize(
+            prepared=prepared,
+            state=state,
+            stop_reason=stop_reason,
+            baseline_eval=baseline_out.eval0,
+            baseline_metrics=baseline_out.baseline.metrics,
+            baseline_summary=baseline_summary.summary,
+            candidate_entries=candidate_entries,
+            candidate_losses=candidate_losses,
+            param_value_errors=setup.param_value_errors,
         )

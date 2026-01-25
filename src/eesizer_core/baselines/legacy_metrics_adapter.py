@@ -32,7 +32,7 @@ from ..runtime.recording_utils import (
     strategy_cfg_to_dict,
 )
 from ..sim.ngspice_runner import resolve_ngspice_executable, _probe_ngspice_version
-from ..strategies.objective_eval import evaluate_objectives
+from ..analysis.objective_eval import evaluate_objectives
 from ..metrics.aliases import canonicalize_metrics
 
 

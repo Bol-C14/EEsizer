@@ -19,3 +19,4 @@ class CornerSearchConfig:
     clamp_corner_overrides: bool
     search_param_ids: list[str] | None
     corner_param_ids: list[str] | None
+    allow_param_ids_override_frozen: bool

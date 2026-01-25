@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from ...contracts import CircuitSource, CircuitSpec, MetricsBundle, Patch, RunResult, StrategyConfig
 from ...contracts.enums import StopReason
@@ -37,6 +37,35 @@ from .attempt import propose_patch
 from .evaluate import MeasureFn, evaluate_metrics, run_baseline
 from .planning import group_metric_names_by_kind, make_observation
 from .state import LoopResult, PatchLoopConfig, PatchLoopState
+
+
+@dataclass
+class _PatchLoopPrepared:
+    history: list[dict[str, Any]]
+    recorder: RunRecorder | None
+    manifest: Any
+    cfg: StrategyConfig
+    source: CircuitSource
+    circuit_ir: Any
+    signature: str
+    param_space: Any
+    guard_cfg: dict[str, Any]
+    config: PatchLoopConfig
+    metric_groups: Mapping[Any, list[str]]
+    param_ids: list[str]
+
+
+@dataclass
+class _PatchLoopBaselineOutcome:
+    result: RunResult | None
+    state: PatchLoopState | None
+    stop_reason: StopReason | None
+
+
+@dataclass
+class _PatchLoopIterationOutcome:
+    stop_reason: StopReason
+    state: PatchLoopState
 
 
 @dataclass
@@ -86,10 +115,13 @@ class PatchLoopStrategy(Strategy):
         if self.registry is None:
             self.registry = DEFAULT_REGISTRY
 
-    def run(self, spec: CircuitSpec, source: CircuitSource, ctx: Any, cfg: StrategyConfig) -> RunResult:  # type: ignore[override]
-        if self.policy is None:
-            raise ValueError("PatchLoopStrategy requires a policy instance")
-
+    def _prepare(
+        self,
+        spec: CircuitSpec,
+        source: CircuitSource,
+        ctx: Any,
+        cfg: StrategyConfig,
+    ) -> _PatchLoopPrepared:
         history: list[dict[str, Any]] = []
         recorder: RunRecorder | None = None
         manifest = None
@@ -207,17 +239,39 @@ class PatchLoopStrategy(Strategy):
 
         metric_names = [obj.metric for obj in spec.objectives]
         metric_groups = group_metric_names_by_kind(self.registry, metric_names)
+        param_ids = [p.param_id for p in param_space.params]
 
-        baseline = run_baseline(
-            source=source,
-            spec=spec,
-            metric_groups=metric_groups,
-            ctx=ctx,
-            guard_cfg=guard_cfg,
-            max_retries=config.max_patch_retries,
-            max_sim_runs=config.max_sim_runs,
+        return _PatchLoopPrepared(
+            history=history,
             recorder=recorder,
             manifest=manifest,
+            cfg=cfg,
+            source=source,
+            circuit_ir=circuit_ir,
+            signature=signature,
+            param_space=param_space,
+            guard_cfg=guard_cfg,
+            config=config,
+            metric_groups=metric_groups,
+            param_ids=param_ids,
+        )
+
+    def _baseline_phase(
+        self,
+        prepared: _PatchLoopPrepared,
+        spec: CircuitSpec,
+        ctx: Any,
+    ) -> _PatchLoopBaselineOutcome:
+        baseline = run_baseline(
+            source=prepared.source,
+            spec=spec,
+            metric_groups=prepared.metric_groups,
+            ctx=ctx,
+            guard_cfg=prepared.guard_cfg,
+            max_retries=prepared.config.max_patch_retries,
+            max_sim_runs=prepared.config.max_sim_runs,
+            recorder=prepared.recorder,
+            manifest=prepared.manifest,
             measure_fn=self.measure_fn,
             deck_build_op=self.deck_build_op,
             sim_run_op=self.sim_run_op,
@@ -227,12 +281,12 @@ class PatchLoopStrategy(Strategy):
         )
 
         if not baseline.success:
-            history.append(
+            prepared.history.append(
                 {
                     "iteration": 0,
                     "patch": None,
-                    "signature_before": signature,
-                    "signature_after": signature,
+                    "signature_before": prepared.signature,
+                    "signature_after": prepared.signature,
                     "metrics": {},
                     "score": float("inf"),
                     "all_pass": False,
@@ -245,13 +299,13 @@ class PatchLoopStrategy(Strategy):
                     "attempts": baseline.attempts,
                 }
             )
-            record_history_entry(recorder, history[-1])
+            record_history_entry(prepared.recorder, prepared.history[-1])
             recording_errors = finalize_run(
-                recorder=recorder,
-                manifest=manifest,
-                best_source=source,
+                recorder=prepared.recorder,
+                manifest=prepared.manifest,
+                best_source=prepared.source,
                 best_metrics=MetricsBundle(),
-                history=history,
+                history=prepared.history,
                 stop_reason=baseline.stop_reason,
                 best_score=float("inf"),
                 best_iter=None,
@@ -259,43 +313,47 @@ class PatchLoopStrategy(Strategy):
                 sim_runs_ok=baseline.sim_runs_ok,
                 sim_runs_failed=baseline.sim_runs_failed,
             )
-            return RunResult(
-                best_source=source,
-                best_metrics=MetricsBundle(),
-                history=history,
+            return _PatchLoopBaselineOutcome(
+                result=RunResult(
+                    best_source=prepared.source,
+                    best_metrics=MetricsBundle(),
+                    history=prepared.history,
+                    stop_reason=baseline.stop_reason,
+                    notes={
+                        "best_score": float("inf"),
+                        "all_pass": False,
+                        "recording_errors": recording_errors,
+                    },
+                ),
+                state=None,
                 stop_reason=baseline.stop_reason,
-                notes={
-                    "best_score": float("inf"),
-                    "all_pass": False,
-                    "recording_errors": recording_errors,
-                },
             )
 
         eval0 = evaluate_metrics(spec, baseline.metrics)
         stop_reason: StopReason | None = StopReason.reached_target if eval0["all_pass"] else None
 
         state = PatchLoopState(
-            current_source=source,
-            current_signature=signature,
-            circuit_ir=circuit_ir,
+            current_source=prepared.source,
+            current_signature=prepared.signature,
+            circuit_ir=prepared.circuit_ir,
             current_metrics=baseline.metrics,
-            best_source=source,
+            best_source=prepared.source,
             best_metrics=baseline.metrics,
             best_score=eval0["score"],
             best_all_pass=eval0["all_pass"],
             best_iter=0,
-            history=history,
+            history=prepared.history,
             sim_runs=baseline.sim_runs,
             sim_runs_ok=baseline.sim_runs_ok,
             sim_runs_failed=baseline.sim_runs_failed,
         )
 
-        history.append(
+        prepared.history.append(
             {
                 "iteration": 0,
                 "patch": None,
-                "signature_before": signature,
-                "signature_after": signature,
+                "signature_before": prepared.signature,
+                "signature_after": prepared.signature,
                 "metrics": {k: v.value for k, v in baseline.metrics.values.items()},
                 "score": state.best_score,
                 "all_pass": state.best_all_pass,
@@ -308,34 +366,20 @@ class PatchLoopStrategy(Strategy):
                 "attempts": baseline.attempts,
             }
         )
-        record_history_entry(recorder, history[-1])
+        record_history_entry(prepared.recorder, prepared.history[-1])
 
-        if stop_reason is StopReason.reached_target:
-            recording_errors = finalize_run(
-                recorder=recorder,
-                manifest=manifest,
-                best_source=state.best_source,
-                best_metrics=state.best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                best_score=state.best_score,
-                best_iter=state.best_iter,
-                sim_runs=state.sim_runs,
-                sim_runs_ok=state.sim_runs_ok,
-                sim_runs_failed=state.sim_runs_failed,
-            )
-            return RunResult(
-                best_source=state.best_source,
-                best_metrics=state.best_metrics,
-                history=history,
-                stop_reason=stop_reason,
-                notes={
-                    "best_score": state.best_score,
-                    "all_pass": state.best_all_pass,
-                    "recording_errors": recording_errors,
-                },
-            )
+        return _PatchLoopBaselineOutcome(result=None, state=state, stop_reason=stop_reason)
 
+    def _run_iterations(
+        self,
+        prepared: _PatchLoopPrepared,
+        spec: CircuitSpec,
+        ctx: Any,
+        state: PatchLoopState,
+    ) -> _PatchLoopIterationOutcome:
+        config = prepared.config
+        history = prepared.history
+        recorder = prepared.recorder
         attempt_ops = AttemptOperators(
             patch_guard_op=self.patch_guard_op,
             patch_apply_op=self.patch_apply_op,
@@ -347,7 +391,8 @@ class PatchLoopStrategy(Strategy):
             sim_run_op=self.sim_run_op,
             metrics_op=self.metrics_op,
         )
-        param_ids = [p.param_id for p in param_space.params]
+
+        stop_reason: StopReason | None = None
 
         for i in range(1, config.max_iters + 1):
             if config.max_sim_runs is not None and state.sim_runs >= config.max_sim_runs:
@@ -370,7 +415,7 @@ class PatchLoopStrategy(Strategy):
 
             cur_eval = evaluate_metrics(spec, state.current_metrics)
             current_score = cur_eval["score"]
-            param_values, param_value_errors = extract_param_values(state.circuit_ir, param_ids=param_ids)
+            param_values, param_value_errors = extract_param_values(state.circuit_ir, param_ids=prepared.param_ids)
 
             success = False
             for attempt in range(config.max_patch_retries + 1):
@@ -394,7 +439,7 @@ class PatchLoopStrategy(Strategy):
                 obs = make_observation(
                     spec=spec,
                     source=state.current_source,
-                    param_space=param_space,
+                    param_space=prepared.param_space,
                     metrics=state.current_metrics,
                     iteration=i,
                     history=history,
@@ -415,14 +460,14 @@ class PatchLoopStrategy(Strategy):
                     cur_source=state.current_source,
                     cur_signature=state.current_signature,
                     circuit_ir=state.circuit_ir,
-                    param_space=param_space,
+                    param_space=prepared.param_space,
                     spec=spec,
                     guard_cfg=config.guard_cfg,
                     apply_opts=config.apply_opts,
-                    metric_groups=metric_groups,
+                    metric_groups=prepared.metric_groups,
                     ctx=ctx,
                     recorder=recorder,
-                    manifest=manifest,
+                    manifest=prepared.manifest,
                     measure_fn=self.measure_fn,
                     ops=attempt_ops,
                 )
@@ -547,17 +592,25 @@ class PatchLoopStrategy(Strategy):
                     state.best_iter = i
                 stop_reason = StopReason.reached_target
                 break
-            if cfg.budget.no_improve_patience and state.no_improve >= cfg.budget.no_improve_patience:
+            if prepared.cfg.budget.no_improve_patience and state.no_improve >= prepared.cfg.budget.no_improve_patience:
                 stop_reason = StopReason.no_improvement
                 break
 
         if stop_reason is None:
             stop_reason = StopReason.max_iterations
 
+        return _PatchLoopIterationOutcome(stop_reason=stop_reason, state=state)
+
+    def _finalize(
+        self,
+        prepared: _PatchLoopPrepared,
+        state: PatchLoopState,
+        stop_reason: StopReason,
+    ) -> RunResult:
         loop_result = LoopResult(
             best_source=state.best_source,
             best_metrics=state.best_metrics,
-            history=history,
+            history=prepared.history,
             stop_reason=stop_reason,
             best_score=state.best_score,
             best_all_pass=state.best_all_pass,
@@ -568,8 +621,8 @@ class PatchLoopStrategy(Strategy):
         )
 
         recording_errors = finalize_run(
-            recorder=recorder,
-            manifest=manifest,
+            recorder=prepared.recorder,
+            manifest=prepared.manifest,
             best_source=loop_result.best_source,
             best_metrics=loop_result.best_metrics,
             history=loop_result.history,
@@ -592,3 +645,20 @@ class PatchLoopStrategy(Strategy):
                 "recording_errors": recording_errors,
             },
         )
+
+    def run(self, spec: CircuitSpec, source: CircuitSource, ctx: Any, cfg: StrategyConfig) -> RunResult:  # type: ignore[override]
+        if self.policy is None:
+            raise ValueError("PatchLoopStrategy requires a policy instance")
+
+        prepared = self._prepare(spec, source, ctx, cfg)
+        baseline_out = self._baseline_phase(prepared, spec, ctx)
+        if baseline_out.result is not None:
+            return baseline_out.result
+
+        assert baseline_out.state is not None
+
+        if baseline_out.stop_reason is StopReason.reached_target:
+            return self._finalize(prepared, baseline_out.state, baseline_out.stop_reason)
+
+        iteration_out = self._run_iterations(prepared, spec, ctx, baseline_out.state)
+        return self._finalize(prepared, iteration_out.state, iteration_out.stop_reason)

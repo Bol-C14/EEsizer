@@ -63,6 +63,7 @@ Strategies MUST:
   - baseline sim errors are captured via guard reports and may stop early with `guard_failed`
 - `GridSearchStrategy`:
   - deterministic coordinate/factorial sweep over `ParamSpace` (frozen params filtered by default)
+  - explicit `param_ids` that overlap frozen params require `allow_param_ids_override_frozen=true`
   - outputs `search/candidates.json`, `search/topk.json`, `search/pareto.json`, `report.md`
   - uses shared attempt pipeline for consistent sim/guard behavior and sim run accounting
 - `CornerSearchStrategy`:
@@ -70,6 +71,7 @@ Strategies MUST:
   - defaults to per-parameter OAT corners; `include_global_corners=false` unless explicitly enabled
   - corner overrides are relative by default (`corner_override_mode=add`) so candidate changes affect corners
   - baseline corner failures are recorded but do not gate search unless `require_baseline_corner_pass=true`
+  - explicit `param_ids` that overlap frozen params require `allow_param_ids_override_frozen=true`
   - outputs `search/corner_set.json`, `search/topk.json`, `search/pareto.json`, `report.md`
 - `MultiAgentOrchestratorStrategy`:
   - agent-driven plan selection that runs grid/corner search sub-strategies

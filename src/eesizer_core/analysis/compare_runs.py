@@ -11,7 +11,7 @@ from ..contracts import CircuitSpec, MetricsBundle, MetricValue, Objective
 from ..metrics.aliases import canonicalize_metrics, canonicalize_metric_name
 from ..metrics.tolerances import DEFAULT_TOL
 from ..runtime.run_loader import RunLoader
-from ..strategies.objective_eval import evaluate_objectives
+from .objective_eval import evaluate_objectives
 
 
 _EPS = 1e-12

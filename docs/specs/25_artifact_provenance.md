@@ -77,7 +77,7 @@ Fields:
 
 Helpers:
 - `to_dict() -> dict` returns a JSON-ready payload.
-- `save_json(path: Path)` writes the manifest (parents created).
+Runtime utilities are responsible for writing manifests to disk (see `runtime/recording_utils.write_manifest_json`).
 
 ## 25.5 RunResult
 

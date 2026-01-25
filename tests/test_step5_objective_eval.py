@@ -1,5 +1,5 @@
 from eesizer_core.contracts import CircuitSpec, Objective, MetricValue, MetricsBundle
-from eesizer_core.strategies.objective_eval import evaluate_objectives
+from eesizer_core.analysis.objective_eval import evaluate_objectives
 
 
 def _bundle(values: dict[str, float | None]) -> MetricsBundle:

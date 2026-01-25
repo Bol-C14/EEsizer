@@ -27,6 +27,7 @@ def parse_corner_search_config(notes: Mapping[str, Any]) -> CornerSearchConfig:
     override_mode = str(cfg.get("corner_override_mode", cfg.get("override_mode", "add"))).lower()
     require_baseline_corner_pass = bool(cfg.get("require_baseline_corner_pass", False))
     clamp_corner_overrides = bool(cfg.get("clamp_corner_overrides", True))
+    allow_param_ids_override_frozen = bool(cfg.get("allow_param_ids_override_frozen", False))
 
     search_param_ids = _as_id_list(cfg.get("search_param_ids"))
     if search_param_ids is None:
@@ -48,4 +49,5 @@ def parse_corner_search_config(notes: Mapping[str, Any]) -> CornerSearchConfig:
         clamp_corner_overrides=clamp_corner_overrides,
         search_param_ids=search_param_ids,
         corner_param_ids=corner_param_ids,
+        allow_param_ids_override_frozen=allow_param_ids_override_frozen,
     )

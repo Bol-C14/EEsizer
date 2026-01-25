@@ -9,7 +9,7 @@ from ...contracts.errors import MetricError, SimulationError, ValidationError
 from ...contracts.guards import GuardCheck, GuardReport
 from ...runtime.recorder import RunRecorder
 from ...runtime.recording_utils import attempt_record, guard_failures, record_operator_result
-from ..objective_eval import evaluate_objectives
+from ...analysis.objective_eval import evaluate_objectives
 from .planning import merge_metrics, sim_plan_for_kind
 from .state import BaselineResult
 

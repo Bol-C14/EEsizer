@@ -1,5 +1,5 @@
 from eesizer_core.contracts import CircuitSpec, Objective, MetricsBundle, MetricValue
-from eesizer_core.strategies.objective_eval import evaluate_objectives
+from eesizer_core.analysis.objective_eval import evaluate_objectives
 
 
 def test_objective_eval_uses_alias_metric_name():

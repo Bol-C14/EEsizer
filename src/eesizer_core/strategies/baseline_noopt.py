@@ -36,7 +36,7 @@ from ..runtime.recording_utils import (
     strategy_cfg_to_dict,
 )
 from ..sim import DeckBuildOperator, NgspiceRunOperator
-from .objective_eval import evaluate_objectives
+from ..analysis.objective_eval import evaluate_objectives
 from .patch_loop.planning import group_metric_names_by_kind, merge_metrics, sim_plan_for_kind
 
 

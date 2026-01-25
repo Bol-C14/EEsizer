@@ -97,7 +97,3 @@ class RunManifest:
                 "notes": self.notes,
             }
         )
-
-    def save_json(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
