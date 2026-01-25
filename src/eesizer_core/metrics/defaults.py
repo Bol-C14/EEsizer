@@ -17,6 +17,15 @@ DEFAULT_REGISTRY = MetricRegistry(
             params={"target_hz": 1e3, "node": "out"},
             description="Magnitude at 1kHz (dB) for node 'out'.",
         ),
+        "ac_mag_db_at_1k_vout": MetricImplSpec(
+            name="ac_mag_db_at_1k_vout",
+            unit="dB",
+            requires_kind=SimKind.ac,
+            requires_outputs=("ac_csv",),
+            compute_fn=compute_ac_mag_db_at,
+            params={"target_hz": 1e3, "node": "vout"},
+            description="Magnitude at 1kHz (dB) for node 'vout'.",
+        ),
         "ac_unity_gain_freq": MetricImplSpec(
             name="ac_unity_gain_freq",
             unit="Hz",
@@ -34,6 +43,15 @@ DEFAULT_REGISTRY = MetricRegistry(
             compute_fn=compute_dc_vout_last,
             params={"node": "out"},
             description="DC output voltage at final sweep point for node 'out'.",
+        ),
+        "dc_vout_last_vout": MetricImplSpec(
+            name="dc_vout_last_vout",
+            unit="V",
+            requires_kind=SimKind.dc,
+            requires_outputs=("dc_csv",),
+            compute_fn=compute_dc_vout_last,
+            params={"node": "vout"},
+            description="DC output voltage at final sweep point for node 'vout'.",
         ),
         "dc_slope": MetricImplSpec(
             name="dc_slope",

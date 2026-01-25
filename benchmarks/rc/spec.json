@@ -1,0 +1,43 @@
+{
+  "objectives": [
+    {
+      "metric": "ac_mag_db_at_1k_vout",
+      "target": -20.0,
+      "sense": "ge"
+    },
+    {
+      "metric": "dc_vout_last_vout",
+      "target": 0.0,
+      "sense": "ge"
+    }
+  ],
+  "constraints": [],
+  "observables": [],
+  "notes": {
+    "sim_plan": {
+      "sims": [
+        {
+          "kind": "ac",
+          "params": {
+            "points_per_decade": 10,
+            "start_hz": 10,
+            "stop_hz": 1000000,
+            "output_nodes": ["vout", "vin"]
+          }
+        },
+        {
+          "kind": "dc",
+          "params": {
+            "sweep_source": "Vin",
+            "sweep_node": "vin",
+            "start": 0.0,
+            "stop": 1.0,
+            "step": 0.5,
+            "output_nodes": ["vout", "vin"],
+            "output_probes": ["i(VDD)"]
+          }
+        }
+      ]
+    }
+  }
+}

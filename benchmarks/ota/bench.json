@@ -1,0 +1,25 @@
+{
+  "name": "ota",
+  "top_netlist": "bench.sp",
+  "dut_netlist": "dut.sp",
+  "spec": "spec.json",
+  "nodes": {
+    "vout": "vout",
+    "vinp": "vinp",
+    "vinn": "vinn"
+  },
+  "supplies": {
+    "vdd_node": "vdd",
+    "vdd_source": "VDD",
+    "vss_node": "0"
+  },
+  "recommended_knobs": [
+    "xu1.w_in",
+    "xu1.l_in",
+    "xu1.w_load",
+    "xu1.l_load",
+    "xu1.cc",
+    "xu1.ibias",
+    "cl.value"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "rc",
+  "top_netlist": "bench.sp",
+  "spec": "spec.json",
+  "nodes": {
+    "vout": "vout",
+    "vin": "vin"
+  },
+  "supplies": {
+    "vdd_node": "vdd",
+    "vdd_source": "VDD"
+  },
+  "recommended_knobs": [
+    "r1.value",
+    "c1.value"
+  ]
+}

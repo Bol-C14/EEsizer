@@ -25,6 +25,7 @@ src/eesizer_core/strategies/   # orchestration (patch loop, baselines)
 src/eesizer_core/policies/     # decision-making (heuristics, LLM/RL/BO stubs)
 tests/                     # refactor-track tests (pytest)
 examples/                  # minimal reproducible demos (ngspice + metrics)
+benchmarks/                # shared benchmark decks + metadata
 docs/wiki/                 # this wiki
 docs/templates/            # schemas / example configs
 output/                    # local run artifacts (gitignored)

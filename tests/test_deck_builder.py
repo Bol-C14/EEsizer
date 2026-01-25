@@ -89,6 +89,32 @@ def test_deck_builder_tran_block():
     assert deck.expected_outputs_meta["tran_csv"] == ("time", "v(out)")
 
 
+def test_deck_builder_dc_with_output_probes():
+    netlist = "VDD vdd 0 1.8\nVin vin 0 0\nR1 vin out 1k\n.end\n"
+    plan = SimPlan(
+        sims=(
+            SimRequest(
+                kind=SimKind.dc,
+                params={
+                    "sweep_source": "Vin",
+                    "sweep_node": "vin",
+                    "start": 0,
+                    "stop": 1,
+                    "step": 1,
+                    "output_nodes": ["out"],
+                    "output_probes": ["i(VDD)"],
+                },
+            ),
+        )
+    )
+    op = DeckBuildOperator()
+    deck = op.run({"netlist_text": netlist, "sim_plan": plan}, ctx=None).outputs["deck"]
+
+    deck_text = deck.text
+    assert "wrdata __OUT__/dc.csv v(out) i(VDD)" in deck_text
+    assert deck.expected_outputs_meta["dc_csv"] == ("v(vin)", "v(out)", "i(VDD)")
+
+
 def test_deck_builder_preserves_base_dir():
     netlist = "V1 in 0 1\nR1 in out 1k\n.end\n"
     plan = SimPlan(sims=(SimRequest(kind=SimKind.ac, params={"output_nodes": ["out"]}),))

@@ -33,10 +33,15 @@ def _normalize_output_nodes(nodes: Iterable[str] | None) -> tuple[str, ...]:
     return tuple(out)
 
 
-def _scale_label(base: str, idx: int) -> str:
-    if idx == 0:
-        return base
-    return f"{base}_{idx}"
+def _normalize_output_probes(probes: Iterable[str] | None) -> tuple[str, ...]:
+    if probes is None:
+        return ()
+    out: list[str] = []
+    for p in probes:
+        if not isinstance(p, str) or not p.strip():
+            raise ValidationError("output_probes must be non-empty strings")
+        out.append(p.strip())
+    return tuple(out)
 
 
 def _inject_control_block(netlist_text: str, control_lines: Sequence[str]) -> str:
@@ -98,6 +103,8 @@ class DeckBuildOperator(Operator):
         start = params.get("start_hz", self.default_start_hz)
         stop = params.get("stop_hz", self.default_stop_hz)
         output_nodes = _normalize_output_nodes(params.get("output_nodes"))
+        output_probes = _normalize_output_probes(params.get("output_probes"))
+        exprs = [f"v({n})" for n in output_nodes] + list(output_probes)
 
         try:
             p_per_dec_int = int(p_per_dec)
@@ -110,20 +117,20 @@ class DeckBuildOperator(Operator):
             ".control",
             "set filetype=ascii",
             f"ac dec {p_per_dec_int} {_format_value(start)} {_format_value(stop)}",
-            f"wrdata {OUTPUT_PLACEHOLDER}/ac.csv {' '.join(f'v({n})' for n in output_nodes)}",
+            f"wrdata {OUTPUT_PLACEHOLDER}/ac.csv {' '.join(exprs)}",
             "quit",
             ".endc",
         ]
-        meta = {"ac_csv": tuple(self._ac_columns(output_nodes))}
+        meta = {"ac_csv": tuple(self._ac_columns(exprs))}
         return control_lines, output_nodes, {"ac_csv": "ac.csv"}, meta
 
     @staticmethod
-    def _ac_columns(nodes: tuple[str, ...]) -> list[str]:
+    def _ac_columns(exprs: Iterable[str]) -> list[str]:
         cols: list[str] = []
-        for idx, node in enumerate(nodes):
-            cols.append(_scale_label("frequency", idx))
-            cols.append(f"real(v({node}))")
-            cols.append(f"imag(v({node}))")
+        cols.append("frequency")
+        for expr in exprs:
+            cols.append(f"real({expr})")
+            cols.append(f"imag({expr})")
         return cols
 
     def _build_dc_control(
@@ -135,6 +142,8 @@ class DeckBuildOperator(Operator):
         stop = params.get("stop", self.default_dc_stop)
         step = params.get("step", self.default_dc_step)
         output_nodes = _normalize_output_nodes(params.get("output_nodes"))
+        output_probes = _normalize_output_probes(params.get("output_probes"))
+        exprs = [f"v({n})" for n in output_nodes] + list(output_probes)
 
         if not isinstance(source, str) or not source:
             raise ValidationError("sweep_source must be a non-empty string")
@@ -143,11 +152,11 @@ class DeckBuildOperator(Operator):
             ".control",
             "set filetype=ascii",
             f"dc {source} {_format_value(start)} {_format_value(stop)} {_format_value(step)}",
-            f"wrdata {OUTPUT_PLACEHOLDER}/dc.csv {' '.join(f'v({n})' for n in output_nodes)}",
+            f"wrdata {OUTPUT_PLACEHOLDER}/dc.csv {' '.join(exprs)}",
             "quit",
             ".endc",
         ]
-        meta = {"dc_csv": tuple(self._dc_columns(sweep_node, output_nodes))}
+        meta = {"dc_csv": tuple(self._dc_columns(sweep_node, exprs))}
         return control_lines, output_nodes, {"dc_csv": "dc.csv"}, meta
 
     def _build_tran_control(
@@ -156,33 +165,32 @@ class DeckBuildOperator(Operator):
         step = params.get("step", self.default_tran_step)
         stop = params.get("stop", self.default_tran_stop)
         output_nodes = _normalize_output_nodes(params.get("output_nodes"))
+        output_probes = _normalize_output_probes(params.get("output_probes"))
+        exprs = [f"v({n})" for n in output_nodes] + list(output_probes)
 
         control_lines = [
             ".control",
             "set filetype=ascii",
             f"tran {_format_value(step)} {_format_value(stop)}",
-            f"wrdata {OUTPUT_PLACEHOLDER}/tran.csv {' '.join(f'v({n})' for n in output_nodes)}",
+            f"wrdata {OUTPUT_PLACEHOLDER}/tran.csv {' '.join(exprs)}",
             "quit",
             ".endc",
         ]
-        meta = {"tran_csv": tuple(self._tran_columns(output_nodes))}
+        meta = {"tran_csv": tuple(self._tran_columns(exprs))}
         return control_lines, output_nodes, {"tran_csv": "tran.csv"}, meta
 
     @staticmethod
-    def _dc_columns(sweep_node: str, nodes: tuple[str, ...]) -> list[str]:
+    def _dc_columns(sweep_node: str, exprs: Iterable[str]) -> list[str]:
         cols: list[str] = []
-        base = f"v({sweep_node})"
-        for idx, node in enumerate(nodes):
-            cols.append(_scale_label(base, idx))
-            cols.append(f"v({node})")
+        cols.append(f"v({sweep_node})")
+        cols.extend(exprs)
         return cols
 
     @staticmethod
-    def _tran_columns(nodes: tuple[str, ...]) -> list[str]:
+    def _tran_columns(exprs: Iterable[str]) -> list[str]:
         cols: list[str] = []
-        for idx, node in enumerate(nodes):
-            cols.append(_scale_label("time", idx))
-            cols.append(f"v({node})")
+        cols.append("time")
+        cols.extend(exprs)
         return cols
 
     @staticmethod

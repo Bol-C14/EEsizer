@@ -6,7 +6,7 @@ This document standardises how we run simulators and compute metrics.
 SimPlan is the “what to run” spec:
 - sim types: `dc`, `ac`, `tran` (SimKind.ams is reserved for future)
 - sweeps: frequency range, time step, etc.
-- outputs: which traces to save, which files to produce
+- outputs: which traces to save, which files to produce (node probes plus optional raw expressions like `i(VDD)`)
 - corners: optional list of PVT corners
 
 ## 2) Operators (recommended split)
@@ -18,7 +18,7 @@ Do not merge these into a single mega-file.
 
 ### Deck/Runner rules (Step4)
 - `SpiceDeck.expected_outputs` names are always written to the run directory (`<workspace_root>/runs/<run_id>/<stage>/...`).
-- `SpiceDeck.expected_outputs_meta` records the wrdata column order (e.g., `("frequency", "real(v(out))", "imag(v(out))")`). For multiple outputs, the scale column is repeated with suffixes (e.g., `frequency`, `frequency_1`, ...).
+- `SpiceDeck.expected_outputs_meta` records the wrdata column order (e.g., `("frequency", "real(v(out))", "imag(v(out))")`). For multiple outputs, the scale column appears once, followed by each probe expression in order.
 - `SpiceDeck.workdir` is mandatory when the source netlist uses relative `.include`/`.lib`; `NgspiceRunOperator` runs with `cwd=workdir` and rewrites wrdata targets to absolute paths under the run directory.
 
 ## 3) Metric registry

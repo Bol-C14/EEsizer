@@ -29,6 +29,10 @@ Additional required inputs:
 Optional inputs:
 - `base_dir: str | Path` (used when not inferable from source)
 
+Per-sim parameters (in `SimRequest.params`) may include:
+- `output_nodes: list[str]` (nodes to probe as `v(<node>)`)
+- `output_probes: list[str]` (raw ngspice expressions, e.g., `i(VDD)`)
+
 ## Outputs
 
 - `deck: SpiceDeck`
@@ -36,9 +40,9 @@ Optional inputs:
 
 ## Wrdata outputs (standardized)
 
-- **AC**: writes `ac.csv` with columns `frequency`, `real(v(<node>))`, `imag(v(<node>))` for each requested output node. For multiple nodes, the scale column repeats with suffixes (e.g., `frequency`, `frequency_1`, ...).
-- **DC**: writes `dc.csv` with columns `v(<sweep_node>)`, `v(<node>)` for each output node; scale repeats per node as `v(<sweep_node>)`, `v(<sweep_node>)_1`, ...
-- **TRAN**: writes `tran.csv` with columns `time`, `v(<node>)` for each output node; scale repeats per node as `time`, `time_1`, ...
+- **AC**: writes `ac.csv` with columns `frequency`, then `real(<expr>)`, `imag(<expr>)` for each requested probe expression (`v(<node>)` plus any `output_probes`).
+- **DC**: writes `dc.csv` with columns `v(<sweep_node>)`, then each probe expression (`v(<node>)` plus any `output_probes`).
+- **TRAN**: writes `tran.csv` with columns `time`, then each probe expression (`v(<node>)` plus any `output_probes`).
 
 ## Validation rules
 
