@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from ..contracts import CircuitSource, CircuitSpec, ParamSpace, Patch
+from ..contracts import CircuitSource, CircuitSpec, ParamSpace, Patch, SimPlan
 from ..contracts.enums import SimKind
 from ..contracts.errors import SimulationError, ValidationError
 from ..contracts.guards import GuardCheck, GuardReport
@@ -50,6 +50,7 @@ def run_attempt(
     manifest: Any,
     measure_fn: MeasureFn | None,
     ops: AttemptOperators,
+    sim_plan: SimPlan | None = None,
     stage_tag: str | None = None,
 ) -> AttemptResult:
     new_source = cur_source
@@ -177,6 +178,7 @@ def run_attempt(
         deck_build_op=ops.deck_build_op,
         sim_run_op=ops.sim_run_op,
         metrics_op=ops.metrics_op,
+        sim_plan=sim_plan,
         stage_tag=stage_tag,
     )
     sim_runs = measurement.sim_runs

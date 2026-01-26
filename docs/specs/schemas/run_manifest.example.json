@@ -46,6 +46,10 @@
     "search/candidates_meta.json": "search/candidates_meta.json",
     "search/topk.json": "search/topk.json",
     "search/pareto.json": "search/pareto.json",
+    "plots/index.json": "plots/index.json",
+    "plots/knob_delta_heatmap.png": "plots/knob_delta_heatmap.png",
+    "plots/knob_delta_heatmap_data.json": "plots/knob_delta_heatmap_data.json",
+    "insights/sensitivity.json": "insights/sensitivity.json",
     "report.md": "report.md"
   },
   "result_summary": {

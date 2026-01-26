@@ -30,7 +30,7 @@
           "params": {
             "points_per_decade": 10,
             "start_hz": 10,
-            "stop_hz": 1000000,
+            "stop_hz": 100000000,
             "output_nodes": ["vout", "vinp", "vinn"]
           }
         },

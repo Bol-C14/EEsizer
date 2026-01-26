@@ -65,7 +65,7 @@ Strategies MUST:
   - deterministic coordinate/factorial sweep over `ParamSpace` (frozen params filtered by default)
   - explicit `param_ids` that overlap frozen params require `allow_param_ids_override_frozen=true`
   - outputs `search/candidates.json`, `search/ranges.json`, `search/candidates_meta.json`, `search/topk.json`,
-    `search/pareto.json`, `report.md`
+    `search/pareto.json`, `plots/index.json` + plot artifacts, `report.md`
   - uses shared attempt pipeline for consistent sim/guard behavior and sim run accounting
 - `CornerSearchStrategy`:
   - evaluates each candidate across a corner set and aggregates worst-case scores/losses
@@ -73,7 +73,8 @@ Strategies MUST:
   - corner overrides are relative by default (`corner_override_mode=add`) so candidate changes affect corners
   - baseline corner failures are recorded but do not gate search unless `require_baseline_corner_pass=true`
   - explicit `param_ids` that overlap frozen params require `allow_param_ids_override_frozen=true`
-  - outputs `search/corner_set.json`, `search/topk.json`, `search/pareto.json`, `report.md`
+  - outputs `search/corner_set.json`, `search/topk.json`, `search/pareto.json`, `plots/index.json` + plot artifacts,
+    `report.md`
 - `MultiAgentOrchestratorStrategy`:
   - agent-driven plan selection that runs grid/corner search sub-strategies
   - records `orchestrator/plan.json`, `orchestrator/plan_execution.jsonl`, and artifact store index

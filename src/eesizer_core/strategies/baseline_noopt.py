@@ -8,8 +8,6 @@ from ..contracts import (
     CircuitSpec,
     MetricsBundle,
     RunResult,
-    SimPlan,
-    SimRequest,
     StrategyConfig,
 )
 from ..contracts.enums import SimKind, StopReason
@@ -38,32 +36,7 @@ from ..runtime.recording_utils import (
 )
 from ..sim import DeckBuildOperator, NgspiceRunOperator
 from ..analysis.objective_eval import evaluate_objectives
-from .patch_loop.planning import group_metric_names_by_kind, merge_metrics, sim_plan_for_kind
-
-
-def _extract_sim_plan(notes: Mapping[str, Any]) -> SimPlan | None:
-    raw = notes.get("sim_plan")
-    if isinstance(raw, SimPlan):
-        return raw
-    if isinstance(raw, Mapping):
-        sims_raw = raw.get("sims")
-        if not isinstance(sims_raw, list) or not sims_raw:
-            return None
-        sims: list[SimRequest] = []
-        for item in sims_raw:
-            if not isinstance(item, Mapping):
-                return None
-            kind = item.get("kind")
-            params = item.get("params", {})
-            if not isinstance(kind, str) or not isinstance(params, Mapping):
-                return None
-            try:
-                sim_kind = SimKind(kind)
-            except ValueError:
-                return None
-            sims.append(SimRequest(kind=sim_kind, params=dict(params)))
-        return SimPlan(sims=tuple(sims))
-    return None
+from .patch_loop.planning import group_metric_names_by_kind, merge_metrics, sim_plan_for_kind, extract_sim_plan
 
 
 def _build_baseline_report(spec: CircuitSpec, metrics: MetricsBundle, eval0: Mapping[str, Any]) -> list[str]:
@@ -190,7 +163,7 @@ class NoOptBaselineStrategy(Strategy):
 
         metric_names = [obj.metric for obj in spec.objectives]
         metric_groups = group_metric_names_by_kind(self.registry, metric_names)
-        sim_plan = _extract_sim_plan(spec.notes) or _extract_sim_plan(cfg.notes)
+        sim_plan = extract_sim_plan(spec.notes) or extract_sim_plan(cfg.notes)
 
         bundles: list[MetricsBundle] = []
         stage_map: dict[str, str] = {}

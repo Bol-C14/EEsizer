@@ -53,6 +53,12 @@ runs/<run_id>/
     candidates_meta.json
     topk.json
     pareto.json
+  plots/
+    index.json
+    *_data.json
+    *.png
+  insights/
+    sensitivity.json
   orchestrator/
     plan.json
     plan_execution.jsonl
@@ -63,7 +69,8 @@ runs/<run_id>/
 All paths referenced in manifest/history SHOULD be relative to the run directory.
 
 Grid search strategies SHOULD populate `search/candidates.json`, `search/ranges.json`, `search/candidates_meta.json`,
-`search/topk.json`, `search/pareto.json`, and `report.md`, and register these files in the run manifest.
+`search/topk.json`, `search/pareto.json`, `plots/index.json`, plot data/PNGs, and `report.md`, and register these files
+in the run manifest.
 Corner search strategies SHOULD add `search/corner_set.json`, populate `search/topk.json` and `search/pareto.json`, and include per-corner
 results in `history/iterations.jsonl`.
 Search strategies SHOULD ensure `search/*.json` and `search/*.md` outputs are indexed in `run_manifest.json`.

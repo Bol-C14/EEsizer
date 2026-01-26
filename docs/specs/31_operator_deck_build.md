@@ -40,6 +40,11 @@ Per-sim parameters (in `SimRequest.params`) may include:
 
 ## Wrdata outputs (standardized)
 
+Control block always includes:
+- `set filetype=ascii`
+- `set wr_vecnames` (emit header)
+- `set wr_singlescale` (single scale column)
+
 - **AC**: writes `ac.csv` with columns `frequency`, then `real(<expr>)`, `imag(<expr>)` for each requested probe expression (`v(<node>)` plus any `output_probes`).
 - **DC**: writes `dc.csv` with columns `v(<sweep_node>)`, then each probe expression (`v(<node>)` plus any `output_probes`).
 - **TRAN**: writes `tran.csv` with columns `time`, then each probe expression (`v(<node>)` plus any `output_probes`).

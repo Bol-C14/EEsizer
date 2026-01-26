@@ -102,7 +102,7 @@ PYTHONPATH=src python examples/run_grid_search_bench.py --bench ota --max-iters 
 Notes:
 - Requires `ngspice` on PATH.
 - Run artifacts are written under `examples/output/runs/<run_id>/` and include `search/ranges.json`,
-  `search/candidates_meta.json`, and `report.md`.
+  `search/candidates_meta.json`, `plots/index.json`, and `report.md`.
 - For other circuits, pass `--netlist` (RC) or `--bench` (benchmarks) and update the spec/bench JSON as needed.
 
 ## Running the corner search demo (Milestone 3)

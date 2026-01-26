@@ -35,7 +35,7 @@ from ...runtime.recording_utils import (
 from ..attempt_pipeline import AttemptOperators, run_attempt
 from .attempt import propose_patch
 from .evaluate import MeasureFn, evaluate_metrics, run_baseline
-from .planning import group_metric_names_by_kind, make_observation
+from .planning import group_metric_names_by_kind, make_observation, extract_sim_plan
 from .state import LoopResult, PatchLoopConfig, PatchLoopState
 
 
@@ -52,6 +52,7 @@ class _PatchLoopPrepared:
     guard_cfg: dict[str, Any]
     config: PatchLoopConfig
     metric_groups: Mapping[Any, list[str]]
+    sim_plan: Any | None
     param_ids: list[str]
 
 
@@ -240,6 +241,7 @@ class PatchLoopStrategy(Strategy):
         metric_names = [obj.metric for obj in spec.objectives]
         metric_groups = group_metric_names_by_kind(self.registry, metric_names)
         param_ids = [p.param_id for p in param_space.params]
+        sim_plan = extract_sim_plan(spec.notes) or extract_sim_plan(cfg.notes)
 
         return _PatchLoopPrepared(
             history=history,
@@ -253,6 +255,7 @@ class PatchLoopStrategy(Strategy):
             guard_cfg=guard_cfg,
             config=config,
             metric_groups=metric_groups,
+            sim_plan=sim_plan,
             param_ids=param_ids,
         )
 
@@ -278,6 +281,7 @@ class PatchLoopStrategy(Strategy):
             metrics_op=self.metrics_op,
             behavior_guard_op=self.behavior_guard_op,
             guard_chain_op=self.guard_chain_op,
+            sim_plan=prepared.sim_plan,
         )
 
         if not baseline.success:
@@ -470,6 +474,7 @@ class PatchLoopStrategy(Strategy):
                     manifest=prepared.manifest,
                     measure_fn=self.measure_fn,
                     ops=attempt_ops,
+                    sim_plan=prepared.sim_plan,
                 )
                 state.sim_runs += attempt_result.sim_runs
                 state.sim_runs_ok += attempt_result.sim_runs_ok

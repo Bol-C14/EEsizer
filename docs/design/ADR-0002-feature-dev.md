@@ -151,6 +151,8 @@ plots/*.png（并嵌入 report.md）
 
 report.md 在每张图后自动生成 2–4 行解释（模板 + 数据驱动）
 
+plots/index.json + plots/*_data.json（图的输入数据与索引，保证可回放）
+
 验收：
 
 一次 grid run 结束后 report.md 打开就能“看懂发生了什么”

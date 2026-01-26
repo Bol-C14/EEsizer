@@ -69,6 +69,7 @@ Metric operator must record:
   - If the first line is non-numeric, treat it as header.
 - If no header, use the column order from `SpiceDeck.expected_outputs_meta`.
 - If `expected_columns` is provided, it overrides header names while preserving column order.
+- `DeckBuildOperator` sets `wr_vecnames` and `wr_singlescale`, so headers should be present and scale appears once.
 - `load_wrdata_table` (in `eesizer_core/io/ngspice_wrdata.py`) is the single loader used by all metrics; do not reimplement parsing.
 - Metrics should record missing probes as `details.status = "missing"` with a `details.reason`.
 

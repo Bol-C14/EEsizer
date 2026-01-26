@@ -20,6 +20,31 @@ def sim_plan_for_kind(kind: SimKind) -> SimPlan:
     return SimPlan(sims=(SimRequest(kind=kind, params={}),))
 
 
+def extract_sim_plan(notes: Mapping[str, Any]) -> SimPlan | None:
+    raw = notes.get("sim_plan")
+    if isinstance(raw, SimPlan):
+        return raw
+    if isinstance(raw, Mapping):
+        sims_raw = raw.get("sims")
+        if not isinstance(sims_raw, list) or not sims_raw:
+            return None
+        sims: list[SimRequest] = []
+        for item in sims_raw:
+            if not isinstance(item, Mapping):
+                return None
+            kind = item.get("kind")
+            params = item.get("params", {})
+            if not isinstance(kind, str) or not isinstance(params, Mapping):
+                return None
+            try:
+                sim_kind = SimKind(kind)
+            except ValueError:
+                return None
+            sims.append(SimRequest(kind=sim_kind, params=dict(params)))
+        return SimPlan(sims=tuple(sims))
+    return None
+
+
 def merge_metrics(bundles: Iterable[MetricsBundle]) -> MetricsBundle:
     out = MetricsBundle()
     for bundle in bundles:

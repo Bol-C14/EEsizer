@@ -116,6 +116,8 @@ class DeckBuildOperator(Operator):
         control_lines = [
             ".control",
             "set filetype=ascii",
+            "set wr_vecnames",
+            "set wr_singlescale",
             f"ac dec {p_per_dec_int} {_format_value(start)} {_format_value(stop)}",
             f"wrdata {OUTPUT_PLACEHOLDER}/ac.csv {' '.join(exprs)}",
             "quit",
@@ -151,6 +153,8 @@ class DeckBuildOperator(Operator):
         control_lines = [
             ".control",
             "set filetype=ascii",
+            "set wr_vecnames",
+            "set wr_singlescale",
             f"dc {source} {_format_value(start)} {_format_value(stop)} {_format_value(step)}",
             f"wrdata {OUTPUT_PLACEHOLDER}/dc.csv {' '.join(exprs)}",
             "quit",
@@ -171,6 +175,8 @@ class DeckBuildOperator(Operator):
         control_lines = [
             ".control",
             "set filetype=ascii",
+            "set wr_vecnames",
+            "set wr_singlescale",
             f"tran {_format_value(step)} {_format_value(stop)}",
             f"wrdata {OUTPUT_PLACEHOLDER}/tran.csv {' '.join(exprs)}",
             "quit",

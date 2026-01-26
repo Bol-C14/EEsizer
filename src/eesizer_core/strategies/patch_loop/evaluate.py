@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
-from ...contracts import CircuitSource, CircuitSpec, MetricsBundle
+from ...contracts import CircuitSource, CircuitSpec, MetricsBundle, SimPlan
 from ...contracts.enums import SimKind, StopReason
 from ...contracts.errors import MetricError, SimulationError, ValidationError
 from ...contracts.guards import GuardCheck, GuardReport
@@ -62,6 +62,7 @@ def measure_metrics(
     deck_build_op: Any,
     sim_run_op: Any,
     metrics_op: Any,
+    sim_plan: SimPlan | None = None,
     stage_tag: str | None = None,
 ) -> MeasurementResult:
     if measure_fn is not None:
@@ -83,7 +84,7 @@ def measure_metrics(
     sim_runs_failed = 0
 
     for kind, names in metric_groups.items():
-        plan = sim_plan_for_kind(kind)
+        plan = sim_plan if sim_plan is not None else sim_plan_for_kind(kind)
         try:
             deck_res = deck_build_op.run({"circuit_source": source, "sim_plan": plan, "sim_kind": kind}, ctx=None)
         except (SimulationError, MetricError, ValidationError) as exc:
@@ -172,6 +173,7 @@ def run_baseline(
     metrics_op: Any,
     behavior_guard_op: Any,
     guard_chain_op: Any,
+    sim_plan: SimPlan | None = None,
 ) -> BaselineResult:
     attempts: list[dict[str, Any]] = []
     guard_report: GuardReport | None = None
@@ -201,6 +203,7 @@ def run_baseline(
             deck_build_op=deck_build_op,
             sim_run_op=sim_run_op,
             metrics_op=metrics_op,
+            sim_plan=sim_plan,
         )
         metrics = measurement.metrics
         stage_map = measurement.stage_map

@@ -29,6 +29,7 @@ from ..operators.guards import (
     TopologyGuardOperator,
 )
 from ..operators.netlist import PatchApplyOperator, TopologySignatureOperator
+from ..operators.report_plots import ReportPlotsOperator
 from ..runtime.recorder import RunRecorder
 from ..runtime.recording_utils import (
     attempt_record,
@@ -46,7 +47,7 @@ from ..search.ranges import RangeTrace, generate_candidates, infer_ranges
 from ..sim import DeckBuildOperator, NgspiceRunOperator
 from .attempt_pipeline import AttemptOperators, run_attempt
 from .patch_loop.evaluate import MeasureFn, evaluate_metrics, run_baseline
-from .patch_loop.planning import group_metric_names_by_kind
+from .patch_loop.planning import group_metric_names_by_kind, extract_sim_plan
 
 
 def _dedupe_ids(values: Sequence[str]) -> list[str]:
@@ -146,6 +147,7 @@ class _GridPrepared:
     guard_cfg: dict[str, Any]
     grid_cfg: GridSearchConfig
     metric_groups: Mapping[Any, list[str]]
+    sim_plan: Any | None
     max_iters: int
     max_sim_runs: int | None
     candidate_budget: int
@@ -200,6 +202,7 @@ class GridSearchStrategy(Strategy):
     metrics_op: Any = None
     registry: MetricRegistry | None = None
     measure_fn: MeasureFn | None = None
+    report_plots_op: Any = None
 
     def __post_init__(self) -> None:
         if self.signature_op is None:
@@ -222,6 +225,8 @@ class GridSearchStrategy(Strategy):
             self.metrics_op = ComputeMetricsOperator()
         if self.registry is None:
             self.registry = DEFAULT_REGISTRY
+        if self.report_plots_op is None:
+            self.report_plots_op = ReportPlotsOperator()
 
     def _prepare(self, spec: CircuitSpec, source: CircuitSource, ctx: Any, cfg: StrategyConfig) -> _GridPrepared:
         history: list[dict[str, Any]] = []
@@ -318,6 +323,7 @@ class GridSearchStrategy(Strategy):
 
         metric_names = [obj.metric for obj in spec.objectives]
         metric_groups = group_metric_names_by_kind(self.registry, metric_names)
+        sim_plan = extract_sim_plan(spec.notes) or extract_sim_plan(cfg.notes)
 
         return _GridPrepared(
             history=history,
@@ -331,6 +337,7 @@ class GridSearchStrategy(Strategy):
             guard_cfg=guard_cfg,
             grid_cfg=grid_cfg,
             metric_groups=metric_groups,
+            sim_plan=sim_plan,
             max_iters=max_iters,
             max_sim_runs=max_sim_runs,
             candidate_budget=candidate_budget,
@@ -358,6 +365,7 @@ class GridSearchStrategy(Strategy):
             metrics_op=self.metrics_op,
             behavior_guard_op=self.behavior_guard_op,
             guard_chain_op=self.guard_chain_op,
+            sim_plan=prepared.sim_plan,
         )
 
         if not baseline.success:
@@ -554,6 +562,7 @@ class GridSearchStrategy(Strategy):
                 manifest=prepared.manifest,
                 measure_fn=self.measure_fn,
                 ops=attempt_ops,
+                sim_plan=prepared.sim_plan,
             )
             state.sim_runs += attempt_result.sim_runs
             state.sim_runs_ok += attempt_result.sim_runs_ok
@@ -681,6 +690,19 @@ class GridSearchStrategy(Strategy):
                 failure_breakdown=failure_breakdown,
             )
             prepared.recorder.write_text("report.md", "\n".join(report_lines))
+            try:
+                plot_result = self.report_plots_op.run(
+                    {
+                        "run_dir": prepared.recorder.run_dir,
+                        "recorder": prepared.recorder,
+                        "manifest": prepared.manifest,
+                        "report_path": "report.md",
+                    },
+                    ctx=None,
+                )
+                record_operator_result(prepared.recorder, plot_result)
+            except Exception:
+                pass
 
         recording_errors = finalize_run(
             recorder=prepared.recorder,

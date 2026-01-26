@@ -13,6 +13,7 @@ from .guards import (
     FormalGuardOperator,
 )
 from .llm import LLMCallOperator, LLMConfig, LLMRequest, LLMResponse
+from .report_plots import ReportPlotsOperator
 
 __all__ = [
     "SpiceSanitizeOperator",
@@ -29,4 +30,5 @@ __all__ = [
     "LLMConfig",
     "LLMRequest",
     "LLMResponse",
+    "ReportPlotsOperator",
 ]

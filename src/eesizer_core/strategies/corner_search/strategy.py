@@ -28,6 +28,7 @@ from ...operators.guards import (
     TopologyGuardOperator,
 )
 from ...operators.netlist import PatchApplyOperator, TopologySignatureOperator
+from ...operators.report_plots import ReportPlotsOperator
 from ...runtime.recorder import RunRecorder
 from ...runtime.recording_utils import (
     attempt_record,
@@ -45,7 +46,7 @@ from ...search.samplers import coordinate_candidates, factorial_candidates, make
 from ...sim import DeckBuildOperator, NgspiceRunOperator
 from ..attempt_pipeline import AttemptOperators, run_attempt
 from ..patch_loop.evaluate import MeasureFn, evaluate_metrics, run_baseline
-from ..patch_loop.planning import group_metric_names_by_kind
+from ..patch_loop.planning import group_metric_names_by_kind, extract_sim_plan
 from .config import parse_corner_search_config
 from .measurement import (
     build_corner_patch,
@@ -72,6 +73,7 @@ class _CornerPrepared:
     corner_cfg: CornerSearchConfig
     corner_cfg_payload: dict[str, Any]
     metric_groups: Mapping[Any, list[str]]
+    sim_plan: Any | None
     max_iters: int
     max_sim_runs: int | None
     candidate_budget: int
@@ -138,6 +140,7 @@ class CornerSearchStrategy(Strategy):
     metrics_op: Any = None
     registry: MetricRegistry | None = None
     measure_fn: MeasureFn | None = None
+    report_plots_op: Any = None
 
     def __post_init__(self) -> None:
         if self.signature_op is None:
@@ -160,6 +163,8 @@ class CornerSearchStrategy(Strategy):
             self.metrics_op = ComputeMetricsOperator()
         if self.registry is None:
             self.registry = DEFAULT_REGISTRY
+        if self.report_plots_op is None:
+            self.report_plots_op = ReportPlotsOperator()
 
     def _prepare(
         self,
@@ -276,6 +281,7 @@ class CornerSearchStrategy(Strategy):
 
         metric_names = [obj.metric for obj in spec.objectives]
         metric_groups = group_metric_names_by_kind(self.registry, metric_names)
+        sim_plan = extract_sim_plan(spec.notes) or extract_sim_plan(cfg.notes)
 
         validation_opts = {
             "wl_ratio_min": guard_cfg.get("wl_ratio_min"),
@@ -312,6 +318,7 @@ class CornerSearchStrategy(Strategy):
             corner_cfg=corner_cfg,
             corner_cfg_payload=corner_cfg_payload,
             metric_groups=metric_groups,
+            sim_plan=sim_plan,
             max_iters=max_iters,
             max_sim_runs=max_sim_runs,
             candidate_budget=candidate_budget,
@@ -341,6 +348,7 @@ class CornerSearchStrategy(Strategy):
             metrics_op=self.metrics_op,
             behavior_guard_op=self.behavior_guard_op,
             guard_chain_op=self.guard_chain_op,
+            sim_plan=prepared.sim_plan,
         )
 
         if not baseline.success:
@@ -711,6 +719,7 @@ class CornerSearchStrategy(Strategy):
                 manifest=prepared.manifest,
                 measure_fn=self.measure_fn,
                 ops=prepared.attempt_ops,
+                sim_plan=prepared.sim_plan,
                 stage_tag=stage_tag_for_corner("nominal"),
             )
             state.sim_runs += attempt_result.sim_runs
@@ -856,6 +865,7 @@ class CornerSearchStrategy(Strategy):
                     manifest=prepared.manifest,
                     measure_fn=self.measure_fn,
                     ops=prepared.attempt_ops,
+                    sim_plan=prepared.sim_plan,
                     stage_tag=stage_tag_for_corner(corner_id),
                 )
                 state.sim_runs += corner_attempt.sim_runs
@@ -1026,6 +1036,19 @@ class CornerSearchStrategy(Strategy):
                 param_value_errors=param_value_errors,
             )
             prepared.recorder.write_text("report.md", "\n".join(report_lines))
+            try:
+                plot_result = self.report_plots_op.run(
+                    {
+                        "run_dir": prepared.recorder.run_dir,
+                        "recorder": prepared.recorder,
+                        "manifest": prepared.manifest,
+                        "report_path": "report.md",
+                    },
+                    ctx=None,
+                )
+                record_operator_result(prepared.recorder, plot_result)
+            except Exception:
+                pass
 
         return self._finalize(prepared, state, stop_reason)
 
@@ -1056,7 +1079,17 @@ class CornerSearchStrategy(Strategy):
             return self._finalize(prepared, state, StopReason.guard_failed)
 
         if baseline_summary.stop_reason is StopReason.reached_target:
-            return self._finalize(prepared, state, baseline_summary.stop_reason)
+            return self._write_report_and_finalize(
+                prepared=prepared,
+                state=state,
+                stop_reason=baseline_summary.stop_reason,
+                baseline_eval=baseline_out.eval0,
+                baseline_metrics=baseline_out.baseline.metrics,
+                baseline_summary=baseline_summary.summary,
+                candidate_entries=[],
+                candidate_losses=[],
+                param_value_errors=setup.param_value_errors,
+            )
 
         candidate_entries, candidate_losses, stop_reason, state = self._evaluate_candidates_loop(
             prepared=prepared,
