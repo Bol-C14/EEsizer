@@ -21,7 +21,7 @@ Compute a set of metrics from `RawSimData` using the metric registry.
 The operator uses `MetricRegistry`:
 - metric names must be unique
 - metrics declare `requires_kind` and `requires_outputs`
-- missing required outputs MUST raise `ValidationError`
+- missing required outputs SHOULD return `value: null` with `details.status = "missing"`
 
 ## Failure modes
 

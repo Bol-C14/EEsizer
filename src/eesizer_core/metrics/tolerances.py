@@ -2,6 +2,7 @@ from __future__ import annotations
 
 DEFAULT_TOL: dict[str, dict[str, float | None]] = {
     "gain_db": {"abs": 0.2, "rel": None},
+    "phase_margin_deg": {"abs": 2.0, "rel": None},
     "pm_deg": {"abs": 2.0, "rel": None},
     "bw_3db_hz": {"abs": None, "rel": 0.05},
     "ugbw_hz": {"abs": None, "rel": 0.05},

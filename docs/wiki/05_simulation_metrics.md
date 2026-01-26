@@ -31,6 +31,15 @@ Every metric must have:
 
 This prevents “same metric name, different definitions”.
 
+### Step2 open-loop metrics (UGBW/PM/Power)
+- UGBW: first 0 dB crossing of |A(jw)|, A=V(vout)/(V(vinp)-V(vinn)); vinp ac=1, vinn ac=0.
+- PM: 180 + phase(A) at UGBW; phase unwrapped.
+- Power: abs(I(VDD)) * VDD from DC operating point.
+
+Required probes:
+- AC: v(vout), v(vinp), v(vinn)
+- DC: i(VDD), v(vdd) (plus v(vout) for sanity)
+
 ### Naming (contract vs implementation)
 - Contract layer: `contracts.artifacts.MetricSpec` = declaration of required sim/output/unit.
 - Implementation layer: `metrics.registry.MetricImplSpec` = executable definition with `compute_fn`.
@@ -61,7 +70,7 @@ Metric operator must record:
 - If no header, use the column order from `SpiceDeck.expected_outputs_meta`.
 - If `expected_columns` is provided, it overrides header names while preserving column order.
 - `load_wrdata_table` (in `eesizer_core/io/ngspice_wrdata.py`) is the single loader used by all metrics; do not reimplement parsing.
-- Metrics must raise clear errors when required columns are missing (no silent fallbacks).
+- Metrics should record missing probes as `details.status = "missing"` with a `details.reason`.
 
 ## 7) Known legacy issues to avoid
 See `legacy/docs/code_review_2025-12-31.md` for prior metric correctness notes.

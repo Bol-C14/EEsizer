@@ -131,8 +131,10 @@ def test_missing_required_output_raises(tmp_path):
         returncode=0,
     )
     op = ComputeMetricsOperator(registry=DEFAULT_REGISTRY)
-    with pytest.raises(ValidationError, match="requires output"):
-        op.run({"raw_data": raw, "metric_names": ["ac_mag_db_at_1k"]}, ctx=None)
+    result = op.run({"raw_data": raw, "metric_names": ["ac_mag_db_at_1k"]}, ctx=None)
+    metrics = result.outputs["metrics"]
+    assert metrics.values["ac_mag_db_at_1k"].value is None
+    assert metrics.values["ac_mag_db_at_1k"].details["status"] == "missing"
 
 
 def test_dc_metrics(tmp_path):

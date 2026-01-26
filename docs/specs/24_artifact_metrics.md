@@ -49,4 +49,20 @@ Fields:
 - `params: dict[str, Any]`
 - `description: str`
 
-The registry enforces a single global name per metric (registry key must match `spec.name`). Metrics MUST validate required outputs and raise structured errors on missing data.
+The registry enforces a single global name per metric (registry key must match `spec.name`).
+
+## 24.5 Canonical metric definitions
+
+Step2 introduces a shared definition list in `eesizer_core.contracts.metrics`:
+- `UGBW_HZ`, `PHASE_MARGIN_DEG`, `POWER_W`
+- `MetricDefinition` + `METRIC_DEFINITIONS`
+
+Reports SHOULD include the definition text for any metrics they list.
+
+## 24.6 Missing data semantics
+
+If a metric cannot be computed (missing outputs, missing probes, no unity crossing), it should:
+- return `value: null`
+- set `details.status = "missing"` and a `details.reason`
+
+Strategies and reports SHOULD surface these reasons instead of crashing.

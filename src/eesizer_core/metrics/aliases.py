@@ -9,10 +9,11 @@ _ALIASES: dict[str, tuple[str, str | None]] = {
     "gain": ("gain_db", "dB"),
     "gain_db": ("gain_db", "dB"),
     # Phase margin
-    "pm": ("pm_deg", "deg"),
-    "pm_output": ("pm_deg", "deg"),
-    "phase_margin": ("pm_deg", "deg"),
-    "pm_deg": ("pm_deg", "deg"),
+    "pm": ("phase_margin_deg", "deg"),
+    "pm_output": ("phase_margin_deg", "deg"),
+    "phase_margin": ("phase_margin_deg", "deg"),
+    "pm_deg": ("phase_margin_deg", "deg"),
+    "phase_margin_deg": ("phase_margin_deg", "deg"),
     # Bandwidth
     "bw": ("bw_3db_hz", "Hz"),
     "bw_output": ("bw_3db_hz", "Hz"),

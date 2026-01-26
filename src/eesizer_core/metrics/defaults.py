@@ -3,7 +3,9 @@ from __future__ import annotations
 from ..contracts.enums import SimKind
 from .registry import MetricRegistry, MetricImplSpec
 from .ac import compute_ac_mag_db_at, compute_unity_gain_freq
+from .ac_loop_metrics import compute_ugbw_hz, compute_phase_margin_deg
 from .dc import compute_dc_vout_last, compute_dc_slope
+from .power_metrics import compute_power_w
 from .tran import compute_tran_rise_time
 
 DEFAULT_REGISTRY = MetricRegistry(
@@ -35,6 +37,24 @@ DEFAULT_REGISTRY = MetricRegistry(
             params={"node": "out", "target_db": 0.0},
             description="First frequency where gain crosses 0 dB for node 'out'.",
         ),
+        "ugbw_hz": MetricImplSpec(
+            name="ugbw_hz",
+            unit="Hz",
+            requires_kind=SimKind.ac,
+            requires_outputs=("ac_csv",),
+            compute_fn=compute_ugbw_hz,
+            params={"output_node": "vout", "input_pos": "vinp", "input_neg": "vinn"},
+            description="Unity-gain bandwidth from open-loop AC response.",
+        ),
+        "phase_margin_deg": MetricImplSpec(
+            name="phase_margin_deg",
+            unit="deg",
+            requires_kind=SimKind.ac,
+            requires_outputs=("ac_csv",),
+            compute_fn=compute_phase_margin_deg,
+            params={"output_node": "vout", "input_pos": "vinp", "input_neg": "vinn"},
+            description="Phase margin at unity gain for open-loop response.",
+        ),
         "dc_vout_last": MetricImplSpec(
             name="dc_vout_last",
             unit="V",
@@ -52,6 +72,15 @@ DEFAULT_REGISTRY = MetricRegistry(
             compute_fn=compute_dc_vout_last,
             params={"node": "vout"},
             description="DC output voltage at final sweep point for node 'vout'.",
+        ),
+        "power_w": MetricImplSpec(
+            name="power_w",
+            unit="W",
+            requires_kind=SimKind.dc,
+            requires_outputs=("dc_csv",),
+            compute_fn=compute_power_w,
+            params={"current_probe": "i(VDD)", "vdd_node": "vdd"},
+            description="Power consumption from DC operating point.",
         ),
         "dc_slope": MetricImplSpec(
             name="dc_slope",

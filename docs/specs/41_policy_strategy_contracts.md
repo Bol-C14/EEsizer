@@ -64,7 +64,8 @@ Strategies MUST:
 - `GridSearchStrategy`:
   - deterministic coordinate/factorial sweep over `ParamSpace` (frozen params filtered by default)
   - explicit `param_ids` that overlap frozen params require `allow_param_ids_override_frozen=true`
-  - outputs `search/candidates.json`, `search/topk.json`, `search/pareto.json`, `report.md`
+  - outputs `search/candidates.json`, `search/ranges.json`, `search/candidates_meta.json`, `search/topk.json`,
+    `search/pareto.json`, `report.md`
   - uses shared attempt pipeline for consistent sim/guard behavior and sim run accounting
 - `CornerSearchStrategy`:
   - evaluates each candidate across a corner set and aggregates worst-case scores/losses

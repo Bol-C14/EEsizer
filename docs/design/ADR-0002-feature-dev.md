@@ -59,6 +59,8 @@ Step 2 统一 Metrics 定义与“测量配方”
 
 交付物（工程侧）：
 
+contracts/metrics.py（UGBW/PM/Power 名称 + 定义文本）
+
 metrics/ 中对 UGBW/PM/Power 的单一实现
 
 sim_plan.json 或类似 artifact 里包含：
@@ -101,11 +103,13 @@ nominal、lower、upper、levels 列表
 
 交付物：
 
-search/ranges.json（或 search/candidates.json 里附 ranges）
+search/ranges.json + search/candidates_meta.json（总数/截断/seed/策略/param_ids）
 
-report.md 新增 “Search ranges & discretization” 小节
+report.md 新增 “Ranges & Discretization” + “Candidate Generation” 小节
 
 如果 budget 截断候选点：必须写明截断策略（字典序/seed shuffle）
+
+Parameters Selected 要写明策略来源（recommended/explicit/auto_truncate）
 
 验收：
 

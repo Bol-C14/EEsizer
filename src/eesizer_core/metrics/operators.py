@@ -53,9 +53,23 @@ class ComputeMetricsOperator(Operator):
                 raise ValidationError(
                     f"Metric '{spec.name}' requires {spec.requires_kind.value} data, got {raw.kind.value}"
                 )
-            for out_name in spec.requires_outputs:
-                if out_name not in raw.outputs:
-                    raise ValidationError(f"Metric '{spec.name}' requires output '{out_name}'")
+            missing_outputs = [out_name for out_name in spec.requires_outputs if out_name not in raw.outputs]
+            if missing_outputs:
+                details = dict(spec.params)
+                details.update(
+                    {
+                        "status": "missing",
+                        "reason": f"missing_output:{','.join(missing_outputs)}",
+                        "missing_outputs": missing_outputs,
+                    }
+                )
+                metrics.values[spec.name] = MetricValue(
+                    name=spec.name,
+                    value=None,
+                    unit=spec.unit,
+                    details=details,
+                )
+                continue
 
             try:
                 value, diag = spec.compute_fn(raw, spec)

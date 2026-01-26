@@ -39,6 +39,8 @@ def test_grid_search_writes_run_outputs(tmp_path):
     assert (run_dir / "best" / "best.sp").exists()
     assert (run_dir / "best" / "best_metrics.json").exists()
     assert (run_dir / "search" / "candidates.json").exists()
+    assert (run_dir / "search" / "ranges.json").exists()
+    assert (run_dir / "search" / "candidates_meta.json").exists()
     assert (run_dir / "search" / "topk.json").exists()
     assert (run_dir / "search" / "pareto.json").exists()
     assert (run_dir / "report.md").exists()
@@ -47,6 +49,8 @@ def test_grid_search_writes_run_outputs(tmp_path):
     files = manifest.get("files", {})
     for rel_path in (
         "search/candidates.json",
+        "search/ranges.json",
+        "search/candidates_meta.json",
         "search/topk.json",
         "search/pareto.json",
         "report.md",
@@ -84,6 +88,8 @@ def test_grid_search_writes_candidates_when_baseline_passes(tmp_path):
     candidates_path = run_dir / "search" / "candidates.json"
     assert candidates_path.exists()
     assert candidates_path.read_text(encoding="utf-8").strip()
+    assert (run_dir / "search" / "ranges.json").exists()
+    assert (run_dir / "search" / "candidates_meta.json").exists()
     assert (run_dir / "search" / "topk.json").exists()
     assert (run_dir / "search" / "pareto.json").exists()
     assert (run_dir / "report.md").exists()

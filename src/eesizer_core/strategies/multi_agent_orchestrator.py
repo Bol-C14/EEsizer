@@ -11,6 +11,7 @@ from ..contracts.enums import StopReason
 from ..contracts.errors import ValidationError
 from ..contracts.plan import Action
 from ..contracts.provenance import stable_hash_json, stable_hash_str
+from ..metrics.reporting import format_metric_line, metric_definition_lines
 from ..operators.netlist import TopologySignatureOperator
 from ..runtime.artifact_store import ArtifactStore
 from ..runtime.context import RunContext
@@ -326,8 +327,13 @@ class MultiAgentOrchestratorStrategy:
             lines.append("## Search Result")
             lines.append(f"- stop_reason: {search_info.get('stop_reason')}")
             lines.append(f"- best_score: {search_info.get('best_score')}")
+            definition_lines = metric_definition_lines(best_metrics.values.keys())
+            if definition_lines:
+                lines.append("")
+                lines.extend(definition_lines)
+                lines.append("")
             for name, mv in best_metrics.values.items():
-                lines.append(f"- metric {name}: {mv.value} {mv.unit or ''}".rstrip())
+                lines.append(format_metric_line(name, mv))
             recorder.write_text("report.md", "\n".join(lines))
 
         # --- Manifest: record orchestrator inputs ---

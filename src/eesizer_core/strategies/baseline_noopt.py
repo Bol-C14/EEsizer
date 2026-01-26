@@ -20,6 +20,7 @@ from ..contracts.strategy import Strategy
 from ..domain.spice.params import ParamInferenceRules, infer_param_space_from_ir
 from ..metrics import ComputeMetricsOperator, MetricRegistry, DEFAULT_REGISTRY
 from ..metrics.aliases import canonicalize_metrics
+from ..metrics.reporting import format_metric_line, metric_definition_lines
 from ..operators.guards import BehaviorGuardOperator, GuardChainOperator
 from ..operators.netlist import TopologySignatureOperator
 from ..runtime.recorder import RunRecorder
@@ -63,6 +64,26 @@ def _extract_sim_plan(notes: Mapping[str, Any]) -> SimPlan | None:
             sims.append(SimRequest(kind=sim_kind, params=dict(params)))
         return SimPlan(sims=tuple(sims))
     return None
+
+
+def _build_baseline_report(spec: CircuitSpec, metrics: MetricsBundle, eval0: Mapping[str, Any]) -> list[str]:
+    lines: list[str] = []
+    lines.append("# Baseline Report")
+    lines.append("")
+    lines.append("## Summary")
+    lines.append(f"- score: {eval0.get('score')}")
+    lines.append(f"- all_pass: {eval0.get('all_pass')}")
+    lines.append("")
+
+    metric_names = [obj.metric for obj in spec.objectives]
+    lines.extend(metric_definition_lines(metric_names))
+    if metric_names:
+        lines.append("")
+
+    lines.append("## Metrics")
+    for name, mv in metrics.values.items():
+        lines.append(format_metric_line(name, mv))
+    return lines
 
 
 @dataclass
@@ -159,6 +180,7 @@ class NoOptBaselineStrategy(Strategy):
             manifest.files.setdefault("provenance/operator_calls.jsonl", "provenance/operator_calls.jsonl")
             manifest.files.setdefault("best/best.sp", "best/best.sp")
             manifest.files.setdefault("best/best_metrics.json", "best/best_metrics.json")
+            manifest.files.setdefault("report.md", "report.md")
             if recorder is not None:
                 recorder.write_input("source.sp", source.text)
                 recorder.write_input("spec.json", spec_payload)
@@ -255,6 +277,9 @@ class NoOptBaselineStrategy(Strategy):
             }
         )
         record_history_entry(recorder, history[-1])
+        if recorder is not None:
+            report_lines = _build_baseline_report(spec, metrics, eval0)
+            recorder.write_text("report.md", "\n".join(report_lines))
 
         recording_errors = finalize_run(
             recorder=recorder,

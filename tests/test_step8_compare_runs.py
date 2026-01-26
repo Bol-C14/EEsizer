@@ -61,11 +61,11 @@ def test_compare_runs_outputs(tmp_path):
 
 def test_objective_table_handles_mismatch():
     rows_a = [{"metric": "gain_db", "passed": True}]
-    rows_b = [{"metric": "gain_db", "passed": False}, {"metric": "pm_deg", "passed": True}]
+    rows_b = [{"metric": "gain_db", "passed": False}, {"metric": "phase_margin_deg", "passed": True}]
     table = _objective_table(rows_a, rows_b)
-    assert {row["metric"] for row in table} == {"gain_db", "pm_deg"}
+    assert {row["metric"] for row in table} == {"gain_db", "phase_margin_deg"}
     lookup = {row["metric"]: row for row in table}
     assert lookup["gain_db"]["a"] is True
     assert lookup["gain_db"]["b"] is False
-    assert lookup["pm_deg"]["a"] is None
-    assert lookup["pm_deg"]["b"] is True
+    assert lookup["phase_margin_deg"]["a"] is None
+    assert lookup["phase_margin_deg"]["b"] is True

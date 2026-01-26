@@ -1,19 +1,28 @@
 {
   "objectives": [
     {
-      "metric": "ac_mag_db_at_1k_vout",
-      "target": -20.0,
+      "metric": "ugbw_hz",
+      "target": 1000000.0,
       "sense": "ge"
     },
     {
-      "metric": "dc_vout_last_vout",
-      "target": 0.0,
+      "metric": "phase_margin_deg",
+      "target": 60.0,
       "sense": "ge"
+    },
+    {
+      "metric": "power_w",
+      "target": 0.01,
+      "sense": "le"
     }
   ],
   "constraints": [],
   "observables": [],
   "notes": {
+    "required_probes": {
+      "ac": ["v(vout)", "v(vinp)", "v(vinn)"],
+      "dc": ["v(vout)", "v(vdd)", "i(VDD)"]
+    },
     "sim_plan": {
       "sims": [
         {
@@ -33,7 +42,7 @@
             "start": 0.9,
             "stop": 0.9,
             "step": 0.1,
-            "output_nodes": ["vout", "vinp", "vinn"],
+            "output_nodes": ["vout", "vinp", "vinn", "vdd"],
             "output_probes": ["i(VDD)"]
           }
         }

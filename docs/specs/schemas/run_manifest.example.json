@@ -42,6 +42,8 @@
     "best/best_metrics.json": "best/best_metrics.json",
     "search/corner_set.json": "search/corner_set.json",
     "search/candidates.json": "search/candidates.json",
+    "search/ranges.json": "search/ranges.json",
+    "search/candidates_meta.json": "search/candidates_meta.json",
     "search/topk.json": "search/topk.json",
     "search/pareto.json": "search/pareto.json",
     "report.md": "report.md"

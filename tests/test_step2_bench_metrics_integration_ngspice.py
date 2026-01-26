@@ -16,7 +16,6 @@ from eesizer_core.strategies import NoOptBaselineStrategy
 
 
 BENCH_ROOT = Path(__file__).resolve().parent.parent / "benchmarks"
-BENCHES = ("rc", "ota", "opamp3")
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -77,39 +76,25 @@ def _load_benchmark(bench_name: str) -> tuple[CircuitSource, CircuitSpec, Path]:
     return source, spec, bench_dir
 
 
-def _header_line(path: Path) -> str:
-    text = path.read_text(encoding="utf-8")
-    for line in text.splitlines():
-        if line.strip():
-            return line.strip()
-    return ""
-
-
 @pytest.mark.integration
-def test_benchmarks_baseline_ngspice(tmp_path: Path) -> None:
+def test_step2_ota_metrics_present(tmp_path: Path) -> None:
     if resolve_ngspice_executable() is None:
         pytest.skip("ngspice not installed")
 
+    source, spec, _ = _load_benchmark("ota")
+    ctx = RunContext(workspace_root=tmp_path / "ota")
+    cfg = StrategyConfig(budget=OptimizationBudget(max_iterations=1, no_improve_patience=1))
     strategy = NoOptBaselineStrategy()
 
-    for bench in BENCHES:
-        source, spec, _ = _load_benchmark(bench)
-        ctx = RunContext(workspace_root=tmp_path / bench)
-        cfg = StrategyConfig(budget=OptimizationBudget(max_iterations=1, no_improve_patience=1))
-        strategy.run(spec=spec, source=source, ctx=ctx, cfg=cfg)
+    strategy.run(spec=spec, source=source, ctx=ctx, cfg=cfg)
 
-        run_dir = ctx.run_dir()
-        ac_path = run_dir / "ac_i000_a00" / "ac.csv"
-        dc_path = run_dir / "dc_i000_a00" / "dc.csv"
-        assert ac_path.exists()
-        assert dc_path.exists()
+    metrics_path = ctx.run_dir() / "best" / "best_metrics.json"
+    metrics_payload = json.loads(metrics_path.read_text(encoding="utf-8"))
 
-        ac_header = _header_line(ac_path).lower()
-        dc_header = _header_line(dc_path).lower()
-        assert "v(vout)" in ac_header
-        assert "v(vout)" in dc_header
-        assert "i(vdd)" in dc_header
-        if bench in ("ota", "opamp3"):
-            assert "v(vinp)" in ac_header
-            assert "v(vinn)" in ac_header
-            assert "v(vdd)" in dc_header
+    ugbw = metrics_payload.get("ugbw_hz", {}).get("value")
+    pm = metrics_payload.get("phase_margin_deg", {}).get("value")
+    power = metrics_payload.get("power_w", {}).get("value")
+
+    assert ugbw is not None and ugbw > 0
+    assert pm is not None and 0 < pm < 180
+    assert power is not None and power > 0

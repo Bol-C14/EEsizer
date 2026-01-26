@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from ..analysis.pareto import objective_losses, pareto_front, top_k
 from ..contracts import (
@@ -13,6 +13,7 @@ from ..contracts import (
     RunResult,
     StrategyConfig,
 )
+from ..contracts.grid_search_config import GridSearchConfig
 from ..contracts.errors import ValidationError
 from ..contracts.enums import PatchOpType, StopReason
 from ..contracts.strategy import Strategy
@@ -20,6 +21,7 @@ from ..contracts.provenance import stable_hash_json, stable_hash_str
 from ..domain.spice.params import ParamInferenceRules, infer_param_space_from_ir
 from ..domain.spice.patching import extract_param_values
 from ..metrics import ComputeMetricsOperator, MetricRegistry, DEFAULT_REGISTRY
+from ..metrics.reporting import format_metric_line, metric_definition_lines
 from ..operators.guards import (
     BehaviorGuardOperator,
     GuardChainOperator,
@@ -39,18 +41,96 @@ from ..runtime.recording_utils import (
     spec_to_dict,
     strategy_cfg_to_dict,
 )
-from ..search.samplers import coordinate_candidates, factorial_candidates, make_levels
+from ..search.grid_config import parse_grid_search_config
+from ..search.ranges import RangeTrace, generate_candidates, infer_ranges
 from ..sim import DeckBuildOperator, NgspiceRunOperator
 from .attempt_pipeline import AttemptOperators, run_attempt
 from .patch_loop.evaluate import MeasureFn, evaluate_metrics, run_baseline
 from .patch_loop.planning import group_metric_names_by_kind
 
 
-def _grid_cfg(notes: Mapping[str, Any]) -> dict[str, Any]:
-    raw = notes.get("grid_search")
-    if isinstance(raw, Mapping):
-        return dict(raw)
-    return {}
+def _dedupe_ids(values: Sequence[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in values:
+        pid = str(item).strip().lower()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        out.append(pid)
+    return out
+
+
+def _select_param_ids(param_space: Any, grid_cfg: GridSearchConfig) -> tuple[list[str], dict[str, Any]]:
+    all_param_ids = [p.param_id for p in param_space.params]
+    frozen_param_ids = [pid for pid in all_param_ids if param_space.get(pid) and param_space.get(pid).frozen]
+    available_param_ids = [pid for pid in all_param_ids if pid not in frozen_param_ids]
+
+    requested: list[str] = []
+    source = "auto_truncate"
+    warnings: list[str] = []
+
+    if grid_cfg.param_select_policy == "recommended":
+        if grid_cfg.recommended_knobs:
+            requested = list(grid_cfg.recommended_knobs)
+            source = "recommended_knobs"
+        elif grid_cfg.param_ids:
+            requested = list(grid_cfg.param_ids)
+            source = "explicit_param_ids"
+        else:
+            warnings.append("no recommended_knobs/param_ids; using auto_truncate")
+    elif grid_cfg.param_select_policy == "explicit":
+        if grid_cfg.param_ids:
+            requested = list(grid_cfg.param_ids)
+            source = "explicit_param_ids"
+        elif grid_cfg.recommended_knobs:
+            requested = list(grid_cfg.recommended_knobs)
+            source = "recommended_knobs_fallback"
+            warnings.append("param_select_policy=explicit but param_ids missing; using recommended_knobs")
+        else:
+            warnings.append("param_select_policy=explicit but param_ids missing; using auto_truncate")
+    else:
+        source = "auto_truncate"
+
+    if requested:
+        selected = _dedupe_ids(requested)
+    else:
+        selected = sorted(available_param_ids)
+
+    missing_param_ids = [pid for pid in selected if param_space.get(pid) is None]
+    frozen_conflicts = [pid for pid in selected if pid in frozen_param_ids]
+
+    if frozen_conflicts and not grid_cfg.allow_param_ids_override_frozen:
+        raise ValidationError(
+            "grid_search param_ids include frozen params: "
+            f"{', '.join(sorted(set(frozen_conflicts)))}; set allow_param_ids_override_frozen=true to override"
+        )
+
+    if not grid_cfg.allow_param_ids_override_frozen:
+        selected = [pid for pid in selected if pid not in frozen_param_ids]
+
+    truncated = False
+    truncated_param_ids: list[str] = []
+    if grid_cfg.max_params and len(selected) > grid_cfg.max_params:
+        truncated = True
+        truncated_param_ids = selected[grid_cfg.max_params :]
+        selected = selected[: grid_cfg.max_params]
+
+    selection_info = {
+        "policy": grid_cfg.param_select_policy,
+        "source": source,
+        "requested_param_ids": list(requested),
+        "recommended_knobs": list(grid_cfg.recommended_knobs),
+        "param_ids": list(selected),
+        "max_params": grid_cfg.max_params,
+        "truncated": truncated,
+        "truncated_param_ids": truncated_param_ids,
+        "missing_param_ids": missing_param_ids,
+        "frozen_param_ids": frozen_param_ids,
+        "allow_param_ids_override_frozen": grid_cfg.allow_param_ids_override_frozen,
+        "warnings": warnings,
+    }
+    return selected, selection_info
 
 
 @dataclass
@@ -64,18 +144,11 @@ class _GridPrepared:
     signature: str
     param_space: Any
     guard_cfg: dict[str, Any]
-    grid_cfg: dict[str, Any]
+    grid_cfg: GridSearchConfig
     metric_groups: Mapping[Any, list[str]]
     max_iters: int
     max_sim_runs: int | None
     candidate_budget: int
-    mode: str
-    levels: int
-    span_mul: float
-    scale: str
-    top_k_count: int
-    stop_on_first_pass: bool
-    baseline_retries: int
 
 
 @dataclass
@@ -103,6 +176,10 @@ class _GridBaselineOutcome:
 class _GridCandidates:
     candidates: list[dict[str, float]]
     param_value_errors: list[str]
+    ranges: list[RangeTrace]
+    candidates_meta: dict[str, object]
+    selection: dict[str, Any]
+    nominal_values: dict[str, float]
 
 
 @dataclass
@@ -221,6 +298,8 @@ class GridSearchStrategy(Strategy):
             manifest.files.setdefault("best/best.sp", "best/best.sp")
             manifest.files.setdefault("best/best_metrics.json", "best/best_metrics.json")
             manifest.files.setdefault("search/candidates.json", "search/candidates.json")
+            manifest.files.setdefault("search/ranges.json", "search/ranges.json")
+            manifest.files.setdefault("search/candidates_meta.json", "search/candidates_meta.json")
             manifest.files.setdefault("search/topk.json", "search/topk.json")
             manifest.files.setdefault("search/pareto.json", "search/pareto.json")
             manifest.files.setdefault("report.md", "report.md")
@@ -231,14 +310,7 @@ class GridSearchStrategy(Strategy):
                 recorder.write_input("cfg.json", cfg_payload)
                 recorder.write_input("signature.txt", signature)
 
-        grid_cfg = _grid_cfg(cfg.notes)
-        mode = str(grid_cfg.get("mode", "coordinate")).lower()
-        levels = int(grid_cfg.get("levels", 10))
-        span_mul = float(grid_cfg.get("span_mul", 10.0))
-        scale = str(grid_cfg.get("scale", "log")).lower()
-        top_k_count = int(grid_cfg.get("top_k", 5))
-        stop_on_first_pass = bool(grid_cfg.get("stop_on_first_pass", False))
-        baseline_retries = int(grid_cfg.get("baseline_retries", 0))
+        grid_cfg = parse_grid_search_config(cfg.notes, cfg.seed)
 
         max_iters = cfg.budget.max_iterations
         max_sim_runs = cfg.budget.max_sim_runs
@@ -262,13 +334,6 @@ class GridSearchStrategy(Strategy):
             max_iters=max_iters,
             max_sim_runs=max_sim_runs,
             candidate_budget=candidate_budget,
-            mode=mode,
-            levels=levels,
-            span_mul=span_mul,
-            scale=scale,
-            top_k_count=top_k_count,
-            stop_on_first_pass=stop_on_first_pass,
-            baseline_retries=baseline_retries,
         )
 
     def _baseline_phase(
@@ -283,7 +348,7 @@ class GridSearchStrategy(Strategy):
             metric_groups=prepared.metric_groups,
             ctx=ctx,
             guard_cfg=prepared.guard_cfg,
-            max_retries=prepared.baseline_retries,
+            max_retries=prepared.grid_cfg.baseline_retries,
             max_sim_runs=prepared.max_sim_runs,
             recorder=prepared.recorder,
             manifest=prepared.manifest,
@@ -390,51 +455,42 @@ class GridSearchStrategy(Strategy):
         )
 
     def _generate_candidates(self, prepared: _GridPrepared) -> _GridCandidates:
-        param_ids = [p.param_id for p in prepared.param_space.params if not p.frozen]
-        cfg_param_ids = prepared.grid_cfg.get("param_ids")
-        if isinstance(cfg_param_ids, (list, tuple)):
-            param_ids = [str(pid).lower() for pid in cfg_param_ids]
-        allow_param_override = bool(prepared.grid_cfg.get("allow_param_ids_override_frozen", False))
-        frozen_conflicts = [
-            pid
-            for pid in param_ids
-            if (prepared.param_space.get(pid) is not None and prepared.param_space.get(pid).frozen)
-        ]
-        if frozen_conflicts and not allow_param_override:
-            raise ValidationError(
-                "grid_search param_ids include frozen params: "
-                f"{', '.join(sorted(set(frozen_conflicts)))}; set allow_param_ids_override_frozen=true to override"
-            )
-
+        param_ids, selection_info = _select_param_ids(prepared.param_space, prepared.grid_cfg)
         baseline_values, param_value_errors = extract_param_values(prepared.circuit_ir, param_ids=param_ids)
-        per_param_levels: dict[str, list[float]] = {}
-        for param_id in param_ids:
-            if param_id not in baseline_values:
-                continue
-            param_def = prepared.param_space.get(param_id)
-            if param_def is None:
-                continue
-            per_param_levels[param_id] = make_levels(
-                nominal=baseline_values[param_id],
-                lower=param_def.lower,
-                upper=param_def.upper,
-                levels=prepared.levels,
-                span_mul=prepared.span_mul,
-                scale=prepared.scale,
-            )
+        ranges = infer_ranges(param_ids, prepared.param_space, baseline_values, prepared.grid_cfg)
 
-        if prepared.mode == "factorial":
-            candidates = factorial_candidates(param_ids, per_param_levels, baseline_values)
-        else:
-            candidates = coordinate_candidates(param_ids, per_param_levels, baseline_values)
+        max_candidates = prepared.candidate_budget
+        if prepared.grid_cfg.max_candidates is not None:
+            max_candidates = min(prepared.grid_cfg.max_candidates, max_candidates)
 
-        if prepared.candidate_budget and len(candidates) > prepared.candidate_budget:
-            candidates = candidates[: prepared.candidate_budget]
+        candidates, candidates_meta = generate_candidates(
+            ranges,
+            baseline_values,
+            prepared.grid_cfg,
+            max_candidates=max_candidates,
+        )
+        candidates_meta = dict(candidates_meta)
+        candidates_meta.update(
+            {
+                "param_ids": list(selection_info.get("param_ids", [])),
+                "selection_policy": selection_info.get("policy"),
+                "selection_source": selection_info.get("source"),
+            }
+        )
 
         if prepared.recorder is not None:
+            prepared.recorder.write_json("search/ranges.json", [r.to_dict() for r in ranges])
             prepared.recorder.write_json("search/candidates.json", candidates)
+            prepared.recorder.write_json("search/candidates_meta.json", candidates_meta)
 
-        return _GridCandidates(candidates=candidates, param_value_errors=param_value_errors)
+        return _GridCandidates(
+            candidates=candidates,
+            param_value_errors=param_value_errors,
+            ranges=ranges,
+            candidates_meta=candidates_meta,
+            selection=selection_info,
+            nominal_values=baseline_values,
+        )
 
     def _evaluate_candidates_loop(
         self,
@@ -578,7 +634,7 @@ class GridSearchStrategy(Strategy):
             candidate_entries.append(candidate_entry)
             candidate_losses.append(losses)
 
-            if prepared.stop_on_first_pass and eval_i["all_pass"]:
+            if prepared.grid_cfg.stop_on_first_pass and eval_i["all_pass"]:
                 stop_reason = StopReason.reached_target
                 break
 
@@ -597,13 +653,18 @@ class GridSearchStrategy(Strategy):
         candidate_entries: list[dict[str, Any]],
         candidate_losses: list[list[float]],
         param_value_errors: list[str],
+        ranges: list[RangeTrace],
+        candidates_meta: dict[str, object],
+        selection: dict[str, Any],
+        nominal_values: Mapping[str, float],
     ) -> RunResult:
         if prepared.recorder is not None:
-            top_entries = top_k(candidate_entries, prepared.top_k_count)
+            top_entries = top_k(candidate_entries, prepared.grid_cfg.top_k)
             pareto_idx = pareto_front(candidate_losses)
             pareto_entries = [candidate_entries[i] for i in pareto_idx] if pareto_idx else []
             prepared.recorder.write_json("search/topk.json", top_entries)
             prepared.recorder.write_json("search/pareto.json", pareto_entries)
+            failure_breakdown = _failure_breakdown(prepared.history)
             report_lines = _build_report(
                 cfg=prepared.cfg,
                 grid_cfg=prepared.grid_cfg,
@@ -613,6 +674,11 @@ class GridSearchStrategy(Strategy):
                 pareto_entries=pareto_entries,
                 sim_runs_failed=state.sim_runs_failed,
                 param_value_errors=param_value_errors,
+                ranges=ranges,
+                candidates_meta=candidates_meta,
+                selection=selection,
+                nominal_values=nominal_values,
+                failure_breakdown=failure_breakdown,
             )
             prepared.recorder.write_text("report.md", "\n".join(report_lines))
 
@@ -660,6 +726,10 @@ class GridSearchStrategy(Strategy):
                 candidate_entries=[],
                 candidate_losses=[],
                 param_value_errors=candidates_out.param_value_errors,
+                ranges=candidates_out.ranges,
+                candidates_meta=candidates_out.candidates_meta,
+                selection=candidates_out.selection,
+                nominal_values=candidates_out.nominal_values,
             )
 
         candidate_entries, candidate_losses, stop_reason, state = self._evaluate_candidates_loop(
@@ -679,36 +749,139 @@ class GridSearchStrategy(Strategy):
             candidate_entries=candidate_entries,
             candidate_losses=candidate_losses,
             param_value_errors=candidates_out.param_value_errors,
+            ranges=candidates_out.ranges,
+            candidates_meta=candidates_out.candidates_meta,
+            selection=candidates_out.selection,
+            nominal_values=candidates_out.nominal_values,
         )
+
+
+def _format_float(value: float | None) -> str:
+    if value is None:
+        return "none"
+    return f"{value:.6g}"
+
+
+def _format_levels(levels: Sequence[float]) -> str:
+    return "[" + ", ".join(_format_float(val) for val in levels) + "]"
+
+
+def _format_candidate_delta(candidate: Mapping[str, float], nominal_values: Mapping[str, float]) -> str:
+    parts: list[str] = []
+    for pid, value in candidate.items():
+        nominal = nominal_values.get(pid)
+        if nominal is None:
+            parts.append(f"{pid}=unknown")
+            continue
+        if nominal == 0:
+            parts.append(f"{pid}={_format_float(value)} (delta={_format_float(value)})")
+            continue
+        ratio = value / nominal
+        parts.append(f"{pid}={_format_float(value)} ({ratio:.3g}x)")
+    return ", ".join(parts)
+
+
+def _failure_breakdown(history: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    breakdown = {"guard_fail": 0, "sim_fail": 0, "metric_missing": 0}
+    for entry in history:
+        if entry.get("iteration") in (None, 0):
+            continue
+        guard = entry.get("guard") or {}
+        if not guard:
+            continue
+        if guard.get("ok", True):
+            continue
+        reasons: list[str] = []
+        for check in guard.get("checks", []) or []:
+            for reason in check.get("reasons", []) or []:
+                reasons.append(str(reason))
+        if any("metric '" in reason or "metric \"" in reason for reason in reasons):
+            breakdown["metric_missing"] += 1
+        elif any("measurement_failed" in reason or "SimulationError" in reason for reason in reasons):
+            breakdown["sim_fail"] += 1
+        else:
+            breakdown["guard_fail"] += 1
+    return breakdown
 
 
 def _build_report(
     *,
     cfg: StrategyConfig,
-    grid_cfg: Mapping[str, Any],
+    grid_cfg: GridSearchConfig,
     baseline_eval: dict[str, Any],
     baseline_metrics: MetricsBundle,
     candidate_entries: list[dict[str, Any]],
     pareto_entries: list[dict[str, Any]],
     sim_runs_failed: int,
     param_value_errors: list[str],
+    ranges: Sequence[RangeTrace],
+    candidates_meta: Mapping[str, object],
+    selection: Mapping[str, Any],
+    nominal_values: Mapping[str, float],
+    failure_breakdown: Mapping[str, int],
 ) -> list[str]:
     lines: list[str] = []
     lines.append("# Grid Search Report")
     lines.append("")
     lines.append("## Run Summary")
     lines.append(f"- max_iterations: {cfg.budget.max_iterations}")
-    lines.append(f"- mode: {grid_cfg.get('mode', 'coordinate')}")
-    lines.append(f"- levels: {grid_cfg.get('levels', 10)}")
-    lines.append(f"- span_mul: {grid_cfg.get('span_mul', 10.0)}")
-    lines.append(f"- scale: {grid_cfg.get('scale', 'log')}")
+    lines.append(f"- mode: {grid_cfg.mode}")
+    lines.append(f"- levels: {grid_cfg.levels}")
+    lines.append(f"- span_mul: {grid_cfg.span_mul}")
+    lines.append(f"- scale: {grid_cfg.scale}")
+    lines.append(f"- include_nominal: {grid_cfg.include_nominal}")
+    if grid_cfg.max_candidates is not None:
+        lines.append(f"- max_candidates: {grid_cfg.max_candidates}")
     lines.append("")
 
+    definition_lines = metric_definition_lines(baseline_metrics.values.keys())
+    if definition_lines:
+        lines.extend(definition_lines)
+        lines.append("")
+
+    lines.append("## Parameters Selected")
+    lines.append(f"- policy: {selection.get('policy')}")
+    lines.append(f"- source: {selection.get('source')}")
+    lines.append(f"- param_ids: {selection.get('param_ids')}")
+    if selection.get("truncated"):
+        lines.append(f"- truncated: true; dropped={selection.get('truncated_param_ids')}")
+    if selection.get("missing_param_ids"):
+        lines.append(f"- missing_param_ids: {selection.get('missing_param_ids')}")
+    if selection.get("warnings"):
+        lines.append(f"- warnings: {selection.get('warnings')}")
+
+    lines.append("")
+    lines.append("## Ranges & Discretization")
+    if not ranges:
+        lines.append("- (none)")
+    for trace in ranges:
+        if trace.skipped:
+            lines.append(f"- {trace.param_id}: skipped ({trace.skip_reason})")
+            continue
+        warnings = trace.sanity.get("warnings", [])
+        warn_text = f", warnings={warnings}" if warnings else ""
+        lines.append(
+            f"- {trace.param_id}: nominal={_format_float(trace.nominal)} "
+            f"lower={_format_float(trace.lower)} upper={_format_float(trace.upper)} "
+            f"scale={trace.scale} levels={_format_levels(trace.levels)} source={trace.source}{warn_text}"
+        )
+
+    lines.append("")
+    lines.append("## Candidate Generation")
+    lines.append(f"- mode: {candidates_meta.get('mode')}")
+    lines.append(f"- include_nominal: {candidates_meta.get('include_nominal')}")
+    lines.append(f"- total_generated: {candidates_meta.get('total_generated')}")
+    lines.append(f"- truncated_to: {candidates_meta.get('truncated_to')}")
+    lines.append(f"- max_candidates: {candidates_meta.get('max_candidates')}")
+    lines.append(f"- truncate_policy: {candidates_meta.get('truncate_policy')}")
+    lines.append(f"- seed: {candidates_meta.get('seed')}")
+
+    lines.append("")
     lines.append("## Baseline")
     lines.append(f"- score: {baseline_eval.get('score')}")
     lines.append(f"- all_pass: {baseline_eval.get('all_pass')}")
     for name, mv in baseline_metrics.values.items():
-        lines.append(f"- metric {name}: {mv.value} {mv.unit or ''}".rstrip())
+        lines.append(format_metric_line(name, mv))
     if param_value_errors:
         lines.append("")
         lines.append("## Param Value Errors")
@@ -717,27 +890,39 @@ def _build_report(
 
     lines.append("")
     lines.append("## Top-K Candidates")
-    for entry in top_k(candidate_entries, int(grid_cfg.get("top_k", 5))):
+    top_entries = top_k(candidate_entries, grid_cfg.top_k)
+    if not top_entries:
+        lines.append("- (none)")
+    for entry in top_entries:
+        delta = _format_candidate_delta(entry.get("candidate", {}), nominal_values)
         lines.append(
             f"- iter {entry.get('iteration')}: score={entry.get('score')} all_pass={entry.get('all_pass')} "
-            f"candidate={entry.get('candidate')}"
+            f"candidate={entry.get('candidate')} delta={delta}"
         )
 
     lines.append("")
     lines.append("## Pareto Front")
+    if not pareto_entries:
+        lines.append("- (none)")
     for entry in pareto_entries:
+        delta = _format_candidate_delta(entry.get("candidate", {}), nominal_values)
         lines.append(
             f"- iter {entry.get('iteration')}: score={entry.get('score')} losses={entry.get('losses')} "
-            f"candidate={entry.get('candidate')}"
+            f"candidate={entry.get('candidate')} delta={delta}"
         )
 
     lines.append("")
     lines.append("## Failures")
     lines.append(f"- sim_runs_failed: {sim_runs_failed}")
+    lines.append(f"- guard_failures: {failure_breakdown.get('guard_fail', 0)}")
+    lines.append(f"- sim_failures: {failure_breakdown.get('sim_fail', 0)}")
+    lines.append(f"- metric_missing: {failure_breakdown.get('metric_missing', 0)}")
 
     lines.append("")
     lines.append("## Files")
     lines.append("- search/candidates.json")
+    lines.append("- search/ranges.json")
+    lines.append("- search/candidates_meta.json")
     lines.append("- search/topk.json")
     lines.append("- search/pareto.json")
     lines.append("- history/iterations.jsonl")

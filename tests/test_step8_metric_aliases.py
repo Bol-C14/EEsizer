@@ -13,7 +13,7 @@ def test_canonicalize_metrics_aliases():
     result = canonicalize_metrics(metrics)
 
     assert "gain_db" in result
-    assert "pm_deg" in result
+    assert "phase_margin_deg" in result
     assert "bw_3db_hz" in result
     assert "ugbw_hz" in result
     assert "out_swing_v" in result
@@ -23,6 +23,6 @@ def test_canonicalize_metrics_aliases():
 
     assert result["gain_db"]["value"] == 12.0
     assert result["gain_db"]["unit"] == "dB"
-    assert result["pm_deg"]["value"] == 60.0
+    assert result["phase_margin_deg"]["value"] == 60.0
     assert result["bw_3db_hz"] == 1e6
     assert result["ugbw_hz"]["value"] == 2e6

@@ -4,6 +4,7 @@ from typing import Any, Mapping
 
 from ...analysis.pareto import top_k
 from ...contracts import MetricsBundle
+from ...metrics.reporting import format_metric_line, metric_definition_lines
 from ...contracts.strategy import StrategyConfig
 
 
@@ -40,6 +41,11 @@ def build_corner_report(
     lines.append(f"- override_mode: {corner_cfg.get('corner_override_mode', corner_cfg.get('override_mode', 'add'))}")
     lines.append("")
 
+    definition_lines = metric_definition_lines(baseline_metrics.values.keys())
+    if definition_lines:
+        lines.extend(definition_lines)
+        lines.append("")
+
     lines.append("## Baseline (Nominal)")
     lines.append(f"- score: {baseline_eval.get('score')}")
     lines.append(f"- all_pass: {baseline_eval.get('all_pass')}")
@@ -47,7 +53,7 @@ def build_corner_report(
     lines.append(f"- pass_rate: {baseline_summary.get('pass_rate')}")
     lines.append(f"- worst_corner_id: {baseline_summary.get('worst_corner_id')}")
     for name, mv in baseline_metrics.values.items():
-        lines.append(f"- metric {name}: {mv.value} {mv.unit or ''}".rstrip())
+        lines.append(format_metric_line(name, mv))
     if param_value_errors:
         lines.append("")
         lines.append("## Param Value Errors")

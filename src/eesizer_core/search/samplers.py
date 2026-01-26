@@ -27,6 +27,8 @@ def make_levels(
     levels: int,
     span_mul: float,
     scale: str = "log",
+    *,
+    include_nominal: bool = False,
 ) -> list[float]:
     if levels <= 0:
         return []
@@ -65,17 +67,32 @@ def make_levels(
             else:
                 step = ratio ** (1.0 / (levels - 1))
                 values = [lower_f * (step**idx) for idx in range(levels)]
-                return _unique_sorted(values)
+                values = _unique_sorted(values)
+                if include_nominal:
+                    values = _insert_nominal(values, nominal_f)
+                return values
 
     step = (upper_f - lower_f) / (levels - 1)
     values = [lower_f + step * idx for idx in range(levels)]
-    return _unique_sorted(values)
+    values = _unique_sorted(values)
+    if include_nominal:
+        values = _insert_nominal(values, nominal_f)
+    return values
+
+
+def _insert_nominal(values: list[float], nominal: float) -> list[float]:
+    for val in values:
+        if isclose(val, nominal, rel_tol=1e-12, abs_tol=1e-12):
+            return values
+    return _unique_sorted([*values, nominal])
 
 
 def coordinate_candidates(
     param_ids: Iterable[str],
     per_param_levels: Mapping[str, list[float]],
     baseline_values: Mapping[str, float],
+    *,
+    include_nominal: bool = False,
 ) -> list[dict[str, float]]:
     candidates: list[dict[str, float]] = []
     for param_id in param_ids:
@@ -84,7 +101,7 @@ def coordinate_candidates(
             continue
         baseline = baseline_values.get(param_id)
         for value in levels:
-            if baseline is not None and isclose(value, baseline, rel_tol=1e-12, abs_tol=0.0):
+            if not include_nominal and baseline is not None and isclose(value, baseline, rel_tol=1e-12, abs_tol=0.0):
                 continue
             candidates.append({param_id: float(value)})
     return candidates
@@ -95,7 +112,7 @@ def factorial_candidates(
     per_param_levels: Mapping[str, list[float]],
     baseline_values: Mapping[str, float] | None = None,
     *,
-    skip_baseline: bool = True,
+    include_nominal: bool = False,
 ) -> list[dict[str, float]]:
     ids = list(param_ids)
     if not ids:
@@ -110,7 +127,7 @@ def factorial_candidates(
     candidates: list[dict[str, float]] = []
     for combo in product(*level_lists):
         candidate = {pid: float(val) for pid, val in zip(ids, combo)}
-        if skip_baseline and baseline_values:
+        if not include_nominal and baseline_values:
             if all(
                 isclose(candidate.get(pid, 0.0), baseline_values.get(pid, 0.0), rel_tol=1e-12, abs_tol=0.0)
                 for pid in ids
@@ -118,3 +135,4 @@ def factorial_candidates(
                 continue
         candidates.append(candidate)
     return candidates
+
