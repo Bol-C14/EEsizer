@@ -16,6 +16,7 @@ from .tool_registry import ToolRegistry
 @dataclass
 class ExecutionEvent:
     action_idx: int
+    action_id: str | None
     op: str
     status: str  # "ok"|"error"
     start_time: float
@@ -28,6 +29,7 @@ class ExecutionEvent:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "action_idx": self.action_idx,
+            "action_id": self.action_id,
             "op": self.op,
             "status": self.status,
             "start_time": self.start_time,
@@ -52,6 +54,8 @@ class PlanExecutor:
         ctx: Any,
         recorder: RunRecorder | None = None,
         log_path: str = "orchestrator/plan_execution.jsonl",
+        start_idx: int = 0,
+        stop_before_approval: bool = False,
     ) -> list[ExecutionEvent]:
         """Execute actions sequentially.
 
@@ -61,8 +65,29 @@ class PlanExecutor:
         events: list[ExecutionEvent] = []
 
         for idx, action in enumerate(actions):
+            if idx < int(start_idx):
+                continue
             if not self.registry.has(action.op):
                 raise ValidationError(f"plan references unknown op '{action.op}'")
+
+            if stop_before_approval and action.requires_approval:
+                now = time.time()
+                ev = ExecutionEvent(
+                    action_idx=idx,
+                    action_id=action.id,
+                    op=action.op,
+                    status="paused",
+                    start_time=now,
+                    end_time=now,
+                    inputs={},
+                    outputs={},
+                    params=dict(action.params),
+                    error="requires_approval",
+                )
+                events.append(ev)
+                if recorder is not None:
+                    recorder.append_jsonl(log_path, ev.to_dict())
+                break
 
             start = time.time()
             in_objs: Dict[str, Any] = {}
@@ -78,6 +103,8 @@ class PlanExecutor:
             try:
                 params = dict(action.params)
                 params.setdefault("_action_idx", idx)
+                params.setdefault("_action_id", action.id)
+                params.setdefault("_action_outputs", list(action.outputs))
                 result = self.registry.execute(action.op, in_objs, ctx, params)
 
                 # Ensure all declared outputs are present.
@@ -90,6 +117,7 @@ class PlanExecutor:
                 end = time.time()
                 ev = ExecutionEvent(
                     action_idx=idx,
+                    action_id=action.id,
                     op=action.op,
                     status="ok",
                     start_time=start,
@@ -105,6 +133,7 @@ class PlanExecutor:
                 end = time.time()
                 ev = ExecutionEvent(
                     action_idx=idx,
+                    action_id=action.id,
                     op=action.op,
                     status="error",
                     start_time=start,

@@ -148,6 +148,19 @@ def build_meta_report(store: SessionStore) -> str:
             lines.append(f"- latest_advice_rev: {state.latest_advice_rev}")
         lines.append("")
 
+    plan_dir = session_dir / "llm" / "plan_advice"
+    if state.latest_plan_rev is not None:
+        latest_plan = plan_dir / f"plan_rev{int(state.latest_plan_rev):04d}"
+        plan_opts = latest_plan / "plan_options.json"
+        status = latest_plan / "status.json"
+        if plan_opts.exists():
+            lines.append("## LLM Plan (Optional)")
+            lines.append(f"- latest_plan_rev: {state.latest_plan_rev}")
+            lines.append(f"- plan_options: {_relpath(session_dir, plan_opts)}")
+            if status.exists():
+                lines.append(f"- plan_status: {_relpath(session_dir, status)}")
+            lines.append("")
+
     # Robustness summary (if present in latest grid run).
     grid_ck = store.load_checkpoint("p1_grid") or {}
     grid_run_dir = grid_ck.get("run_dir")

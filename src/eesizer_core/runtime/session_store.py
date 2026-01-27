@@ -238,3 +238,53 @@ class SessionStore:
             return replace(state, advice_history=updated)
 
         self.update_session_state(_update)
+
+    # ---- Plan helpers (Step8) ----
+
+    def plan_dir(self, rev: int) -> Path:
+        return self.session_dir / "llm" / "plan_advice" / f"plan_rev{int(rev):04d}"
+
+    def latest_plan_rev(self) -> int | None:
+        return self.load_session_state().latest_plan_rev
+
+    def mark_plan_decision(self, *, rev: int, decision: str, reason: str | None = None) -> None:
+        plan_dir = self.plan_dir(rev)
+        status_path = plan_dir / "status.json"
+        payload: dict[str, Any] = {}
+        if status_path.exists():
+            try:
+                raw = json.loads(status_path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    payload.update(raw)
+            except Exception:
+                pass
+        payload.update({"decision": str(decision), "decision_reason": reason, "decided_at": _utc_now_iso()})
+        self.recorder.write_json(self.recorder.relpath(status_path), payload)
+
+        def _update(state: SessionState) -> SessionState:
+            history = list(state.plan_history)
+            updated: list[dict[str, Any]] = []
+            found = False
+            for entry in history:
+                if not isinstance(entry, dict):
+                    continue
+                if int(entry.get("rev") or -1) == int(rev):
+                    entry = dict(entry)
+                    entry["decision"] = str(decision)
+                    if reason is not None:
+                        entry["decision_reason"] = reason
+                    entry["decided_at"] = payload.get("decided_at")
+                    found = True
+                updated.append(entry)
+            if not found:
+                updated.append(
+                    {
+                        "rev": int(rev),
+                        "decision": str(decision),
+                        "decision_reason": reason,
+                        "decided_at": payload.get("decided_at"),
+                    }
+                )
+            return replace(state, plan_history=updated)
+
+        self.update_session_state(_update)

@@ -59,6 +59,8 @@ class SessionState:
     artifacts_index: dict[str, str] = field(default_factory=dict)
     latest_advice_rev: int | None = None
     advice_history: list[dict[str, Any]] = field(default_factory=list)
+    latest_plan_rev: int | None = None
+    plan_history: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +77,8 @@ class SessionState:
             "artifacts_index": dict(self.artifacts_index),
             "latest_advice_rev": self.latest_advice_rev,
             "advice_history": list(self.advice_history),
+            "latest_plan_rev": self.latest_plan_rev,
+            "plan_history": list(self.plan_history),
         }
 
     @staticmethod
@@ -99,4 +103,6 @@ class SessionState:
             artifacts_index=dict(payload.get("artifacts_index") or {}),
             latest_advice_rev=payload.get("latest_advice_rev"),
             advice_history=list(payload.get("advice_history") or []),
+            latest_plan_rev=payload.get("latest_plan_rev"),
+            plan_history=list(payload.get("plan_history") or []),
         )

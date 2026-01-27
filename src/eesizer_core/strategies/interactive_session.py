@@ -228,7 +228,7 @@ class InteractiveSessionStrategy:
         source: CircuitSource,
         spec_delta: Mapping[str, Any] | None = None,
         cfg_delta: Mapping[str, Any] | None = None,
-        next_phase: str = "p2_corner_validate",
+        next_phase: str | None = "p2_corner_validate",
         actor: str = "human",
         reason: str = "continue_session",
     ) -> None:
@@ -293,16 +293,21 @@ class InteractiveSessionStrategy:
                 state = store.load_session_state()
                 cfg = new_cfg
 
-        # Re-run phases if needed based on checkpoints.
-        session_ctx = RunContext(workspace_root=store.run_dir.parents[1], run_id=state.session_id, seed=state.seed)
-        self._run_phases(
-            store=store,
-            session_ctx=session_ctx,
-            source=source,
-            spec=spec,
-            cfg=cfg,
-            run_to_phase=next_phase,
-        )
+        # Re-run phases if requested (checkpointed).
+        if next_phase is not None:
+            session_ctx = RunContext(workspace_root=store.run_dir.parents[1], run_id=state.session_id, seed=state.seed)
+            self._run_phases(
+                store=store,
+                session_ctx=session_ctx,
+                source=source,
+                spec=spec,
+                cfg=cfg,
+                run_to_phase=next_phase,
+            )
+        else:
+            # Delta-only updates still refresh the meta report.
+            report = build_meta_report(store)
+            store.recorder.write_text("session/meta_report.md", report)
 
     def _run_phases(
         self,

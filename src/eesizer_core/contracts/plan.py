@@ -26,6 +26,10 @@ class Action:
     inputs: Tuple[str, ...] = ()
     outputs: Tuple[str, ...] = ()
     params: Dict[str, Any] = field(default_factory=dict)
+    # Optional metadata (Step8): kept separate from params to stay audit-friendly.
+    id: str | None = None
+    requires_approval: bool = False
+    notes: str | None = None
 
 
 Plan = Tuple[Action, ...]
@@ -51,6 +55,12 @@ def validate_action(action: Action) -> None:
         raise ValidationError("action.outputs must be unique")
     if not isinstance(action.params, dict):
         raise ValidationError("action.params must be a dict")
+    if action.id is not None and (not isinstance(action.id, str) or not action.id.strip()):
+        raise ValidationError("action.id must be a non-empty string when provided")
+    if not isinstance(action.requires_approval, bool):
+        raise ValidationError("action.requires_approval must be a bool")
+    if action.notes is not None and not isinstance(action.notes, str):
+        raise ValidationError("action.notes must be a string when provided")
 
 
 def validate_plan(plan: Sequence[Action]) -> Plan:

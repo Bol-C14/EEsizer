@@ -11,7 +11,15 @@ from eesizer_core.contracts.enums import SourceKind
 from eesizer_core.contracts.strategy import OptimizationBudget, StrategyConfig
 from eesizer_core.metrics.aliases import canonicalize_metric_name
 from eesizer_core.operators.session_llm_advice import SessionLLMAdviseOperator
+from eesizer_core.operators.session_llm_plan_advice import SessionLLMPlanAdviceOperator
 from eesizer_core.runtime.context import RunContext
+from eesizer_core.runtime.session_plan_execution import build_session_plan_tool_fns
+from eesizer_core.runtime.session_plan_runner import (
+    actions_from_plan_option,
+    execute_plan_option,
+    write_dry_run,
+)
+from eesizer_core.runtime.session_plan_tools import build_session_plan_registry
 from eesizer_core.runtime.session_store import SessionStore
 from eesizer_core.strategies.interactive_session import InteractiveSessionStrategy
 
@@ -319,6 +327,206 @@ def cmd_accept(args: argparse.Namespace) -> None:
     print("meta_report: " + str(Path(args.session_run_dir) / "session" / "meta_report.md"))
 
 
+def cmd_plan(args: argparse.Namespace) -> None:
+    store = SessionStore(args.session_run_dir)
+    state = store.load_session_state()
+
+    llm_cfg = {
+        "provider": args.provider,
+        "model": args.model,
+        "temperature": args.temperature,
+        "max_tokens": args.max_tokens,
+        "seed": args.seed,
+    }
+
+    inputs: dict[str, Any] = {"session_run_dir": args.session_run_dir, "llm_config": llm_cfg, "max_repairs": args.max_repairs}
+    if args.mock_llm:
+        inputs["llm_config"] = {**llm_cfg, "provider": "mock"}
+        inputs["mock_response"] = json.dumps(
+            {
+                "options": [
+                    {
+                        "title": "Mock Robust-first",
+                        "intent": "mock",
+                        "plan": [
+                            {
+                                "id": "a01",
+                                "op": "update_cfg",
+                                "inputs": ["session_run_dir", "source"],
+                                "outputs": ["session/cfg_rev", "session/cfg_hash"],
+                                "params": {"cfg_delta": {"notes": {"grid_search": {"levels": 7}}}},
+                                "requires_approval": False,
+                                "notes": "",
+                            },
+                            {
+                                "id": "a02",
+                                "op": "run_grid_search",
+                                "inputs": ["session_run_dir", "source"],
+                                "outputs": ["p1/run_dir", "p1/topk", "p1/pareto"],
+                                "params": {},
+                                "requires_approval": False,
+                                "notes": "",
+                            },
+                            {
+                                "id": "a03",
+                                "op": "run_corner_validate",
+                                "inputs": ["session_run_dir", "source"],
+                                "outputs": ["p2/run_dir", "p2/robust_topk", "p2/robust_pareto"],
+                                "params": {},
+                                "requires_approval": True,
+                                "notes": "human approval before corner cost",
+                            },
+                        ],
+                    },
+                    {
+                        "title": "Mock Explore-more",
+                        "intent": "mock",
+                        "plan": [
+                            {
+                                "id": "b01",
+                                "op": "update_cfg",
+                                "inputs": ["session_run_dir", "source"],
+                                "outputs": ["session/cfg_rev", "session/cfg_hash"],
+                                "params": {"cfg_delta": {"notes": {"grid_search": {"levels": 10, "span_mul": 10.0}}}},
+                                "requires_approval": False,
+                                "notes": "",
+                            },
+                            {
+                                "id": "b02",
+                                "op": "run_grid_search",
+                                "inputs": ["session_run_dir", "source"],
+                                "outputs": ["p1/run_dir", "p1/topk", "p1/pareto"],
+                                "params": {},
+                                "requires_approval": False,
+                                "notes": "",
+                            },
+                        ],
+                    },
+                    {
+                        "title": "Mock Budget-safe",
+                        "intent": "mock",
+                        "plan": [
+                            {
+                                "id": "c01",
+                                "op": "run_grid_search",
+                                "inputs": ["session_run_dir", "source"],
+                                "outputs": ["p1/run_dir", "p1/topk", "p1/pareto"],
+                                "params": {},
+                                "requires_approval": False,
+                                "notes": "",
+                            }
+                        ],
+                    },
+                ]
+            }
+        )
+
+    op = SessionLLMPlanAdviceOperator()
+    ctx = _session_ctx_for_run_dir(args.session_run_dir)
+    result = op.run(inputs, ctx=ctx)
+    print(f"session_id: {state.session_id}")
+    print(f"plan_rev: {result.outputs.get('plan_rev')}")
+    print(f"plan_dir: {result.outputs.get('plan_dir')}")
+    print("meta_report: " + str(Path(args.session_run_dir) / "session" / "meta_report.md"))
+
+
+def cmd_show_plan(args: argparse.Namespace) -> None:
+    store = SessionStore(args.session_run_dir)
+    state = store.load_session_state()
+    rev = args.plan_rev if args.plan_rev is not None else state.latest_plan_rev
+    if rev is None:
+        raise SystemExit("no plan_rev available; run plan first")
+    plan_dir = store.plan_dir(rev)
+    plan_path = plan_dir / "plan_options.json"
+    payload = _read_json(plan_path)
+    if not isinstance(payload, dict):
+        raise SystemExit(f"invalid plan_options.json at {plan_path}")
+    options = payload.get("options") or []
+    if not isinstance(options, list):
+        raise SystemExit("plan_options.options must be a list")
+    print(f"plan_rev: {rev}")
+    for idx, opt in enumerate(options):
+        if not isinstance(opt, Mapping):
+            continue
+        print(f"[{idx}] {opt.get('title')} — {opt.get('intent')}")
+
+
+def cmd_dry_run(args: argparse.Namespace) -> None:
+    store = SessionStore(args.session_run_dir)
+    state = store.load_session_state()
+    rev = args.plan_rev if args.plan_rev is not None else state.latest_plan_rev
+    if rev is None:
+        raise SystemExit("no plan_rev available; run plan first")
+    plan_dir = store.plan_dir(rev)
+    plan_payload = _read_json(plan_dir / "plan_options.json")
+    if not isinstance(plan_payload, dict):
+        raise SystemExit("plan_options.json missing/invalid")
+    options = plan_payload.get("options") or []
+    if not isinstance(options, list) or not options:
+        raise SystemExit("plan_options.options empty")
+    if args.option_index < 0 or args.option_index >= len(options):
+        raise SystemExit("option_index out of range")
+
+    opt = options[args.option_index]
+    if not isinstance(opt, Mapping):
+        raise SystemExit("selected option invalid")
+    tool_catalog = _read_json(plan_dir / "tool_catalog.json")
+    out = write_dry_run(plan_dir=plan_dir, plan_option=dict(opt), tool_catalog=tool_catalog if isinstance(tool_catalog, Mapping) else None)
+    print("dry_run: " + str(out))
+
+
+def cmd_execute_plan(args: argparse.Namespace) -> None:
+    store = SessionStore(args.session_run_dir)
+    state = store.load_session_state()
+    rev = args.plan_rev if args.plan_rev is not None else state.latest_plan_rev
+    if rev is None:
+        raise SystemExit("no plan_rev available; run plan first")
+    plan_dir = store.plan_dir(rev)
+    plan_payload = _read_json(plan_dir / "plan_options.json")
+    if not isinstance(plan_payload, dict):
+        raise SystemExit("plan_options.json missing/invalid")
+    options = plan_payload.get("options") or []
+    if not isinstance(options, list) or not options:
+        raise SystemExit("plan_options.options empty")
+    if args.option_index < 0 or args.option_index >= len(options):
+        raise SystemExit("option_index out of range")
+
+    opt = options[args.option_index]
+    if not isinstance(opt, Mapping):
+        raise SystemExit("selected option invalid")
+
+    chosen = {
+        "plan_rev": int(rev),
+        "option_index": int(args.option_index),
+        "title": str(opt.get("title") or ""),
+        "reason": args.reason or "",
+    }
+    (plan_dir / "chosen_option.json").write_text(json.dumps(chosen, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+    store.mark_plan_decision(rev=rev, decision="accepted", reason=args.reason)
+
+    # Tool registry (configured for execution).
+    tool_fns = build_session_plan_tool_fns(measure_fn=_mock_measure_fn if args.mock else None)
+    registry = build_session_plan_registry(tool_fns=tool_fns)
+
+    # Seeded artifacts and execute.
+    source, _, _ = _load_benchmark(state.bench_id)
+    actions = actions_from_plan_option(opt)
+    state_out = execute_plan_option(
+        plan_dir=plan_dir,
+        actions=actions,
+        registry=registry,
+        session_run_dir=args.session_run_dir,
+        source=source,
+        auto_approve=args.auto_approve,
+        resume=not args.no_resume,
+    )
+
+    # Update decision based on execution state.
+    store.mark_plan_decision(rev=rev, decision=state_out.status, reason=args.reason)
+    print(f"execution_status: {state_out.status}")
+    print("meta_report: " + str(Path(args.session_run_dir) / "session" / "meta_report.md"))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Interactive session runner (Step6/7).")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -396,6 +604,38 @@ def main() -> None:
     p_accept.add_argument("--reason", type=str, default=None)
     p_accept.add_argument("--mock", action="store_true", help="Run with deterministic mock measure_fn (no ngspice).")
     p_accept.set_defaults(fn=cmd_accept)
+
+    p_plan = sub.add_parser("plan", help="Generate a multi-step tool plan (Step8).")
+    p_plan.add_argument("--session-run-dir", type=Path, required=True)
+    p_plan.add_argument("--provider", type=str, default="openai", choices=("openai", "mock"))
+    p_plan.add_argument("--model", type=str, default="gpt-4.1")
+    p_plan.add_argument("--temperature", type=float, default=0.2)
+    p_plan.add_argument("--max-tokens", type=int, default=None)
+    p_plan.add_argument("--seed", type=int, default=None)
+    p_plan.add_argument("--max-repairs", type=int, default=1)
+    p_plan.add_argument("--mock-llm", action="store_true", help="Use built-in canned plan options.")
+    p_plan.set_defaults(fn=cmd_plan)
+
+    p_show_plan = sub.add_parser("show-plan", help="Print plan options for the latest plan.")
+    p_show_plan.add_argument("--session-run-dir", type=Path, required=True)
+    p_show_plan.add_argument("--plan-rev", type=int, default=None)
+    p_show_plan.set_defaults(fn=cmd_show_plan)
+
+    p_dry = sub.add_parser("dry-run", help="Generate a dry-run summary for a plan option.")
+    p_dry.add_argument("--session-run-dir", type=Path, required=True)
+    p_dry.add_argument("--plan-rev", type=int, default=None)
+    p_dry.add_argument("--option-index", type=int, required=True)
+    p_dry.set_defaults(fn=cmd_dry_run)
+
+    p_exec = sub.add_parser("execute-plan", help="Execute a plan option (deterministic, checkpointable).")
+    p_exec.add_argument("--session-run-dir", type=Path, required=True)
+    p_exec.add_argument("--plan-rev", type=int, default=None)
+    p_exec.add_argument("--option-index", type=int, required=True)
+    p_exec.add_argument("--auto-approve", action="store_true", help="Do not pause on requires_approval actions.")
+    p_exec.add_argument("--no-resume", action="store_true", help="Ignore any saved execution_state and restart from action 0.")
+    p_exec.add_argument("--reason", type=str, default=None)
+    p_exec.add_argument("--mock", action="store_true", help="Run with deterministic mock measure_fn (no ngspice).")
+    p_exec.set_defaults(fn=cmd_execute_plan)
 
     args = parser.parse_args()
     args.fn(args)
