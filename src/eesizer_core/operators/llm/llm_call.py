@@ -183,7 +183,7 @@ class LLMCallOperator(Operator):
         request_payload = _request_payload(request)
 
         (stage_dir / "request.json").write_text(
-            json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8"
+            json.dumps(request_payload, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8"
         )
         (stage_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
 

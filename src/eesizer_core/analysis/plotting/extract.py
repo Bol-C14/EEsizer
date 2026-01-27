@@ -171,6 +171,37 @@ def _extract_robust_rows(history: Iterable[Mapping[str, Any]]) -> list[dict[str,
     return rows
 
 
+def _extract_robust_rows_from_search(run_dir: Path) -> list[dict[str, Any]]:
+    """Fallback robust rows source for grid+corner_validate runs.
+
+    CornerValidateOperator writes robust results under search/robust_*.json without
+    rewriting history.jsonl (so we avoid mutating past runs). Plotting can still
+    render robustness plots by reading these files.
+    """
+    payload = _read_json(run_dir / "search" / "robust_candidates.json")
+    if not isinstance(payload, list) or not payload:
+        payload = _read_json(run_dir / "search" / "robust_topk.json")
+    if not isinstance(payload, list) or not payload:
+        return []
+    rows: list[dict[str, Any]] = []
+    for entry in payload:
+        if not isinstance(entry, Mapping):
+            continue
+        nominal = entry.get("nominal_metrics") or {}
+        worst = entry.get("worst_metrics") or {}
+        if not isinstance(nominal, Mapping) or not isinstance(worst, Mapping):
+            continue
+        rows.append(
+            {
+                "iteration": entry.get("iteration"),
+                "nominal_metrics": dict(nominal),
+                "worst_metrics": dict(worst),
+                "worst_corner_id": entry.get("worst_corner_id"),
+            }
+        )
+    return rows
+
+
 def extract_plot_context(run_dir: Path) -> PlotContext:
     run_dir = Path(run_dir)
     loader = RunLoader(run_dir)
@@ -235,6 +266,8 @@ def extract_plot_context(run_dir: Path) -> PlotContext:
     rows.sort(key=lambda r: r.get("iteration", 0))
     spec_payload = _parse_spec_payload(run_dir)
     robust_rows = _extract_robust_rows(history_entries)
+    if not robust_rows:
+        robust_rows = _extract_robust_rows_from_search(run_dir)
 
     return PlotContext(
         rows=rows,

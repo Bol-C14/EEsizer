@@ -293,7 +293,7 @@ def compare_runs(run_dir_a: Path, run_dir_b: Path, out_dir: Path) -> dict[str, A
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "comparison.json").write_text(
-        json.dumps(comparison, indent=2, sort_keys=True),
+        json.dumps(comparison, indent=2, sort_keys=True, allow_nan=False),
         encoding="utf-8",
     )
 

@@ -431,7 +431,9 @@ class GridSearchStrategy(Strategy):
             sim_runs_ok=baseline.sim_runs_ok,
             sim_runs_failed=baseline.sim_runs_failed,
         )
-        stop_reason: StopReason | None = StopReason.reached_target if state.best_all_pass else None
+        stop_reason: StopReason | None = (
+            StopReason.reached_target if state.best_all_pass and not prepared.grid_cfg.continue_after_baseline_pass else None
+        )
 
         prepared.history.append(
             {
@@ -852,6 +854,7 @@ def _build_report(
     lines.append(f"- span_mul: {grid_cfg.span_mul}")
     lines.append(f"- scale: {grid_cfg.scale}")
     lines.append(f"- include_nominal: {grid_cfg.include_nominal}")
+    lines.append(f"- continue_after_baseline_pass: {grid_cfg.continue_after_baseline_pass}")
     if grid_cfg.max_candidates is not None:
         lines.append(f"- max_candidates: {grid_cfg.max_candidates}")
     lines.append("")

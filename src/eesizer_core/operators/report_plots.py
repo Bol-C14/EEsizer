@@ -66,6 +66,10 @@ class ReportPlotsOperator(Operator):
                 png="plots/tradeoff_pm_vs_ugbw.png",
                 data="plots/tradeoff_pm_vs_ugbw_data.json",
             ),
+            "tradeoff_objectives": PlotPaths(
+                png="plots/tradeoff_objectives.png",
+                data="plots/tradeoff_objectives_data.json",
+            ),
             "failures_breakdown": PlotPaths(
                 png="plots/failures_breakdown.png",
                 data="plots/failures_breakdown_data.json",
@@ -126,6 +130,50 @@ class ReportPlotsOperator(Operator):
         )
         if not ok and reason:
             skipped.append(("tradeoff_power_vs_ugbw", reason))
+
+        # Fallback: tradeoff between primary objectives (e.g., RC)
+        if not ok and reason == "no_points":
+            axes = _select_objective_tradeoff_axes(context.spec_payload)
+            if axes is None:
+                obj_ok, obj_reason = False, "no_objective_pair"
+                obj_data: dict[str, Any] = {
+                    "plot": "tradeoff_objectives",
+                    "x_metric": None,
+                    "y_metric": None,
+                    "points": [],
+                }
+            else:
+                x_metric, y_metric = axes
+                obj_data = build_tradeoff_data(context.rows, x_metric=x_metric, y_metric=y_metric)
+                if _has_points(obj_data):
+                    obj_ok, obj_reason = render_scatter(
+                        obj_data,
+                        run_dir / plots["tradeoff_objectives"].png,
+                        title=f"Tradeoff: {y_metric} vs {x_metric}",
+                        x_label=x_metric,
+                        y_label=y_metric,
+                    )
+                else:
+                    obj_ok, obj_reason = False, "no_points"
+
+            obj_sha = stable_hash_json(obj_data)
+            recorder.write_json(plots["tradeoff_objectives"].data, obj_data)
+            plot_entries.append(
+                PlotEntry(
+                    name="tradeoff_objectives",
+                    png_path=plots["tradeoff_objectives"].png if obj_ok else None,
+                    data_path=plots["tradeoff_objectives"].data,
+                    data_sha256=obj_sha,
+                    status="ok" if obj_ok else "skipped",
+                    skip_reason=obj_reason,
+                    notes={
+                        "x_metric": obj_data.get("x_metric"),
+                        "y_metric": obj_data.get("y_metric"),
+                    },
+                )
+            )
+            if not obj_ok and obj_reason:
+                skipped.append(("tradeoff_objectives", obj_reason))
 
         # PM vs UGBW
         pm_data = build_pm_vs_ugbw_data(context.rows, context.spec_payload)
@@ -233,6 +281,29 @@ class ReportPlotsOperator(Operator):
             },
             provenance=prov,
         )
+
+
+def _select_objective_tradeoff_axes(spec_payload: Mapping[str, Any]) -> tuple[str, str] | None:
+    objectives = spec_payload.get("objectives", []) if isinstance(spec_payload, Mapping) else []
+    metric_ids: list[str] = []
+    for obj in objectives or []:
+        if not isinstance(obj, Mapping):
+            continue
+        metric = obj.get("metric")
+        if not isinstance(metric, str) or not metric.strip():
+            continue
+        mid = metric.strip()
+        if mid not in metric_ids:
+            metric_ids.append(mid)
+    if len(metric_ids) < 2:
+        return None
+
+    # Heuristic: prefer x=dc_* and y=ac_* for RC-like specs.
+    ac = next((m for m in metric_ids if m.lower().startswith("ac_") or "ac_" in m.lower()), None)
+    dc = next((m for m in metric_ids if m.lower().startswith("dc_") or "dc_" in m.lower()), None)
+    if ac and dc and ac != dc:
+        return dc, ac
+    return metric_ids[0], metric_ids[1]
 
 
 def _has_points(data: Mapping[str, Any]) -> bool:

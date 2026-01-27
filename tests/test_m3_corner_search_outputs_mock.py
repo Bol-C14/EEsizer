@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from eesizer_core.contracts import CircuitSource, CircuitSpec, MetricValue, MetricsBundle, Objective
 from eesizer_core.contracts.enums import SourceKind
@@ -52,9 +53,15 @@ def test_corner_search_writes_outputs_and_corners(tmp_path: Path) -> None:
     assert (run_dir / "best" / "best.sp").exists()
     assert (run_dir / "best" / "best_metrics.json").exists()
     assert (run_dir / "search" / "corner_set.json").exists()
+    assert (run_dir / "search" / "candidates.json").exists()
+    assert (run_dir / "search" / "ranges.json").exists()
+    assert (run_dir / "search" / "candidates_meta.json").exists()
     assert (run_dir / "search" / "topk.json").exists()
     assert (run_dir / "search" / "pareto.json").exists()
     assert (run_dir / "report.md").exists()
+
+    ranges = json.loads((run_dir / "search" / "ranges.json").read_text(encoding="utf-8"))
+    assert any(entry.get("param_id") == "r1.value" and entry.get("nominal") is not None for entry in ranges)
 
     assert result.history
     for entry in result.history:

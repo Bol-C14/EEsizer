@@ -152,7 +152,7 @@ def _prune_manifest_files(manifest: Any, run_dir: Path) -> None:
 def write_manifest_json(manifest: Any, path: Path) -> None:
     payload = manifest.to_dict() if hasattr(manifest, "to_dict") else manifest
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
 
 
 def _relativize_stage_map(stage_map: Mapping[str, str], recorder: RunRecorder | None) -> dict[str, str]:

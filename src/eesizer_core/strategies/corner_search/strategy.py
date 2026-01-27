@@ -42,6 +42,7 @@ from ...runtime.recording_utils import (
     strategy_cfg_to_dict,
 )
 from ...search.corners import build_corner_set
+from ...search.ranges import RangeTrace
 from ...search.samplers import coordinate_candidates, factorial_candidates, make_levels
 from ...sim import DeckBuildOperator, NgspiceRunOperator
 from ..attempt_pipeline import AttemptOperators, run_attempt
@@ -248,6 +249,8 @@ class CornerSearchStrategy(Strategy):
             manifest.files.setdefault("best/best_metrics.json", "best/best_metrics.json")
             manifest.files.setdefault("search/corner_set.json", "search/corner_set.json")
             manifest.files.setdefault("search/candidates.json", "search/candidates.json")
+            manifest.files.setdefault("search/ranges.json", "search/ranges.json")
+            manifest.files.setdefault("search/candidates_meta.json", "search/candidates_meta.json")
             manifest.files.setdefault("search/topk.json", "search/topk.json")
             manifest.files.setdefault("search/pareto.json", "search/pareto.json")
             manifest.files.setdefault("report.md", "report.md")
@@ -460,19 +463,99 @@ class CornerSearchStrategy(Strategy):
             prepared.recorder.write_json("search/corner_set.json", corner_set)
 
         per_param_levels: dict[str, list[float]] = {}
+        ranges: list[RangeTrace] = []
         for param_id in search_param_ids:
             if param_id not in baseline_values:
+                ranges.append(
+                    RangeTrace(
+                        param_id=param_id,
+                        nominal=None,
+                        lower=None,
+                        upper=None,
+                        scale=str(prepared.corner_cfg.scale or "log"),
+                        levels=[],
+                        source="unknown",
+                        span_mul=prepared.corner_cfg.span_mul,
+                        sanity={"warnings": []},
+                        skipped=True,
+                        skip_reason="missing_nominal",
+                    )
+                )
                 continue
             param_def = prepared.param_space.get(param_id)
             if param_def is None:
+                ranges.append(
+                    RangeTrace(
+                        param_id=param_id,
+                        nominal=None,
+                        lower=None,
+                        upper=None,
+                        scale=str(prepared.corner_cfg.scale or "log"),
+                        levels=[],
+                        source="unknown",
+                        span_mul=prepared.corner_cfg.span_mul,
+                        sanity={"warnings": []},
+                        skipped=True,
+                        skip_reason="param_not_found",
+                    )
+                )
                 continue
-            per_param_levels[param_id] = make_levels(
-                nominal=baseline_values[param_id],
-                lower=param_def.lower,
-                upper=param_def.upper,
+
+            nominal = baseline_values.get(param_id)
+            span_mul = float(prepared.corner_cfg.span_mul)
+            lower = param_def.lower
+            upper = param_def.upper
+            source = ""
+            warnings: list[str] = []
+            clipped = False
+
+            if lower is not None and upper is not None:
+                source = "bounds"
+            else:
+                span = span_mul if span_mul > 0 else 1.0
+                derived_lower = nominal / span if nominal != 0 else -span
+                derived_upper = nominal * span if nominal != 0 else span
+                if lower is None:
+                    lower = derived_lower
+                if upper is None:
+                    upper = derived_upper
+                source = "nominal*span_mul" if param_def.lower is None and param_def.upper is None else "bounds+span"
+
+            if lower is not None and upper is not None and lower > upper:
+                lower, upper = upper, lower
+                clipped = True
+                warnings.append("bounds_swapped")
+
+            scale = str(prepared.corner_cfg.scale or "log").lower()
+            if scale == "log" and (lower is None or upper is None or lower <= 0 or upper <= 0):
+                scale = "linear"
+                warnings.append("log_fallback_linear")
+
+            levels = make_levels(
+                nominal=nominal,
+                lower=lower,
+                upper=upper,
                 levels=prepared.corner_cfg.levels,
-                span_mul=prepared.corner_cfg.span_mul,
-                scale=prepared.corner_cfg.scale,
+                span_mul=span_mul,
+                scale=scale,
+            )
+            per_param_levels[param_id] = levels
+            ranges.append(
+                RangeTrace(
+                    param_id=param_id,
+                    nominal=nominal,
+                    lower=lower,
+                    upper=upper,
+                    scale=scale,
+                    levels=list(levels),
+                    source=source,
+                    span_mul=span_mul,
+                    sanity={
+                        "positive_required": scale == "log",
+                        "clipped": clipped,
+                        "warnings": warnings,
+                    },
+                )
             )
 
         if prepared.corner_cfg.mode == "factorial":
@@ -480,11 +563,29 @@ class CornerSearchStrategy(Strategy):
         else:
             candidates = coordinate_candidates(search_param_ids, per_param_levels, baseline_values)
 
-        if prepared.candidate_budget and len(candidates) > prepared.candidate_budget:
-            candidates = candidates[: prepared.candidate_budget]
+        total_generated = len(candidates)
+        max_candidates = prepared.candidate_budget
+        truncated = False
+        if max_candidates is not None and total_generated > max_candidates:
+            candidates = candidates[:max_candidates]
+            truncated = True
 
         if prepared.recorder is not None:
+            prepared.recorder.write_json("search/ranges.json", [r.to_dict() for r in ranges])
             prepared.recorder.write_json("search/candidates.json", candidates)
+            prepared.recorder.write_json(
+                "search/candidates_meta.json",
+                {
+                    "mode": prepared.corner_cfg.mode,
+                    "include_nominal": False,
+                    "total_generated": total_generated,
+                    "truncated_to": len(candidates),
+                    "max_candidates": max_candidates,
+                    "truncate_policy": "lexicographic",
+                    "seed": 0,
+                    "truncated": truncated,
+                },
+            )
 
         corner_defs = corner_set.get("corners", []) or []
         param_bounds = corner_set.get("param_bounds", {})

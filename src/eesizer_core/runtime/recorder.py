@@ -6,6 +6,7 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Iterable
 import json
+import math
 import os
 
 
@@ -27,8 +28,11 @@ class RunRecorder:
 
     def _jsonable(self, value: Any) -> Any:
         """Convert a value into a JSON-serializable structure."""
-        if value is None or isinstance(value, (str, int, float, bool)):
+        if value is None or isinstance(value, (str, int, bool)):
             return value
+        if isinstance(value, float):
+            # Strict JSON doesn't permit NaN/Infinity.
+            return value if math.isfinite(value) else None
         if isinstance(value, Path):
             return self.relpath(value)
         if isinstance(value, dict):
@@ -84,7 +88,7 @@ class RunRecorder:
         path = self._resolve_rel_path(rel_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         normalized = self._normalize_payload(payload)
-        path.write_text(json.dumps(normalized, indent=2, sort_keys=True), encoding="utf-8")
+        path.write_text(json.dumps(normalized, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
         return path
 
     def append_jsonl(self, rel_path: str, payload: Any) -> Path:
@@ -93,7 +97,7 @@ class RunRecorder:
         path.parent.mkdir(parents=True, exist_ok=True)
         normalized = self._normalize_payload(payload)
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(normalized, sort_keys=True))
+            fh.write(json.dumps(normalized, sort_keys=True, allow_nan=False))
             fh.write("\n")
         return path
 

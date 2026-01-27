@@ -88,7 +88,10 @@ def build_corner_report(
 
     lines.append("")
     lines.append("## Files")
+    lines.append("- search/candidates.json")
     lines.append("- search/corner_set.json")
+    lines.append("- search/ranges.json")
+    lines.append("- search/candidates_meta.json")
     lines.append("- search/topk.json")
     lines.append("- search/pareto.json")
     lines.append("- history/iterations.jsonl")

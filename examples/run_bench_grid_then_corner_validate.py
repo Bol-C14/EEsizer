@@ -9,6 +9,7 @@ from eesizer_core.contracts import CircuitSource, CircuitSpec, Constraint, Objec
 from eesizer_core.contracts.enums import SourceKind
 from eesizer_core.contracts.strategy import OptimizationBudget, StrategyConfig
 from eesizer_core.metrics.aliases import canonicalize_metric_name
+from eesizer_core.operators import CornerValidateOperator
 from eesizer_core.runtime.context import RunContext
 from eesizer_core.sim.ngspice_runner import resolve_ngspice_executable
 from eesizer_core.strategies import GridSearchStrategy
@@ -94,7 +95,7 @@ def _load_benchmark(bench_name: str) -> tuple[CircuitSource, CircuitSpec, Path, 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run grid search on a benchmark.")
+    parser = argparse.ArgumentParser(description="Run grid search then corner-validate top candidates.")
     parser.add_argument("--bench", required=True, help="Benchmark name (rc, ota, opamp3).")
     parser.add_argument(
         "--out",
@@ -102,6 +103,9 @@ def main() -> None:
         default=Path(__file__).resolve().parent / "output",
         help="Workspace directory for run artifacts.",
     )
+    parser.add_argument("--seed", type=int, default=0, help="Deterministic seed (used in some truncation policies).")
+
+    # Grid search knobs
     parser.add_argument("--max-iters", type=int, default=21, help="Total iterations (baseline + candidates).")
     parser.add_argument("--levels", type=int, default=10, help="Levels per parameter.")
     parser.add_argument("--span-mul", type=float, default=10.0, help="Span multiplier when bounds are missing.")
@@ -116,11 +120,36 @@ def main() -> None:
         action="store_true",
         help="If baseline already meets objectives, still evaluate candidates (paper trade-off runs).",
     )
+
+    # Robust validation knobs
+    parser.add_argument(
+        "--candidates-source",
+        type=str,
+        default="topk",
+        choices=("topk", "pareto"),
+        help="Which grid artifact list to validate.",
+    )
+    parser.add_argument(
+        "--corners",
+        type=str,
+        default="oat",
+        choices=("global", "oat", "oat_topm"),
+        help="Corner selection mode.",
+    )
+    parser.add_argument("--top-m", type=int, default=3, help="Top-M params for corners=oat_topm.")
+    parser.add_argument(
+        "--override-mode",
+        type=str,
+        default="add",
+        choices=("set", "add", "mul"),
+        help="How corners apply relative to the candidate nominal.",
+    )
+    parser.add_argument("--no-clamp", action="store_true", help="Disable clamping corner overrides to bounds.")
     args = parser.parse_args()
 
-    strategy = GridSearchStrategy()
-    if resolve_ngspice_executable(strategy.sim_run_op.ngspice_bin) is None:
-        print("ngspice not found; skipping run_grid_search_bench")
+    grid = GridSearchStrategy()
+    if resolve_ngspice_executable(grid.sim_run_op.ngspice_bin) is None:
+        print("ngspice not found; skipping run_bench_grid_then_corner_validate")
         return
 
     source, spec, bench_dir, recommended_knobs = _load_benchmark(args.bench)
@@ -140,19 +169,47 @@ def main() -> None:
     if recommended_knobs:
         grid_notes["recommended_knobs"] = recommended_knobs
 
+    corner_validate_notes: dict[str, Any] = {
+        "candidates_source": args.candidates_source,
+        "corners": args.corners,
+        "top_m": args.top_m,
+        "override_mode": args.override_mode,
+        "clamp_corner_overrides": not args.no_clamp,
+    }
+
     cfg = StrategyConfig(
         budget=OptimizationBudget(max_iterations=args.max_iters, no_improve_patience=1),
-        notes={"grid_search": grid_notes},
+        seed=args.seed,
+        notes={
+            "grid_search": grid_notes,
+            "corner_validate": corner_validate_notes,
+        },
     )
     ctx = RunContext(workspace_root=args.out)
 
-    result = strategy.run(spec=spec, source=source, ctx=ctx, cfg=cfg)
+    result = grid.run(spec=spec, source=source, ctx=ctx, cfg=cfg)
     print(f"bench_dir: {bench_dir}")
     print(f"recommended_knobs: {len(recommended_knobs)}")
     print(f"run_dir: {ctx.run_dir()}")
-    print(f"stop_reason: {result.stop_reason}")
-    print(f"best_score: {result.notes.get('best_score')}")
+    print(f"grid_stop_reason: {result.stop_reason}")
+
+    cv = CornerValidateOperator()
+    cv.run(
+        {
+            "run_dir": ctx.run_dir(),
+            "recorder": ctx.recorder(),
+            "manifest": ctx.manifest(),
+            "source": source,
+            "spec": spec,
+            "cfg": cfg,
+            "candidates_source": args.candidates_source,
+            "corner_validate": corner_validate_notes,
+        },
+        ctx=ctx,
+    )
+    print("corner_validate: done")
 
 
 if __name__ == "__main__":
     main()
+

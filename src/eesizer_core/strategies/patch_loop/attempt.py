@@ -79,7 +79,7 @@ def _propose_llm_patch(
             ctx,
             stage,
             "parsed_patch.json",
-            json.dumps(_llm_patch_payload(patch), indent=2, sort_keys=True),
+            json.dumps(_llm_patch_payload(patch), indent=2, sort_keys=True, allow_nan=False),
         )
         return patch
 

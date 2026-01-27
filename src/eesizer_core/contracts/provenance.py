@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import hashlib
 import json
+import math
 import time
 
 
@@ -17,8 +18,11 @@ def stable_hash_str(s: str) -> str:
 
 
 def _to_jsonable(obj: Any) -> Any:
-    if obj is None or isinstance(obj, (str, int, float, bool)):
+    if obj is None or isinstance(obj, (str, int, bool)):
         return obj
+    if isinstance(obj, float):
+        # Strict JSON doesn't permit NaN/Infinity.
+        return obj if math.isfinite(obj) else None
     if isinstance(obj, bytes):
         return {"__bytes__": obj.hex()}
     if isinstance(obj, tuple):
@@ -33,7 +37,7 @@ def _to_jsonable(obj: Any) -> Any:
 def stable_hash_json(obj: Any) -> str:
     """Stable hash using JSON with sorted keys and normalized containers."""
     normalized = _to_jsonable(obj)
-    data = json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    data = json.dumps(normalized, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return stable_hash_bytes(data)
 
 
@@ -100,5 +104,5 @@ class RunManifest:
 
     def save_json(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
+        payload = json.dumps(self.to_dict(), indent=2, sort_keys=True, allow_nan=False) + "\n"
         path.write_text(payload, encoding="utf-8")

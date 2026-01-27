@@ -95,6 +95,7 @@ def parse_grid_search_config(notes: Mapping[str, Any], seed: int | None) -> Grid
     top_k = _coerce_int(raw.get("top_k", 5), "top_k")
     stop_on_first_pass = bool(raw.get("stop_on_first_pass", False))
     baseline_retries = _coerce_int(raw.get("baseline_retries", 0), "baseline_retries", min_value=0)
+    continue_after_baseline_pass = bool(raw.get("continue_after_baseline_pass", False))
     max_params = _coerce_int(raw.get("max_params", 8), "max_params")
 
     max_candidates_raw = raw.get("max_candidates")
@@ -128,6 +129,7 @@ def parse_grid_search_config(notes: Mapping[str, Any], seed: int | None) -> Grid
         top_k=top_k,
         stop_on_first_pass=stop_on_first_pass,
         baseline_retries=baseline_retries,
+        continue_after_baseline_pass=continue_after_baseline_pass,
         max_params=max_params,
         max_candidates=max_candidates,
         param_ids=param_ids,

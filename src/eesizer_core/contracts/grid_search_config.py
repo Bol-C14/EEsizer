@@ -15,6 +15,7 @@ class GridSearchConfig:
     baseline_retries: int
     max_params: int
     max_candidates: int | None
+    continue_after_baseline_pass: bool = False
     param_ids: tuple[str, ...] = ()
     recommended_knobs: tuple[str, ...] = ()
     param_select_policy: str = "recommended"

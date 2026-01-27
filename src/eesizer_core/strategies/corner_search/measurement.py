@@ -1,24 +1,18 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Mapping
 
 from ...analysis.pareto import objective_losses
 from ...contracts import MetricsBundle, Patch, PatchOp
 from ...contracts.enums import PatchOpType
 from ...contracts.guards import GuardReport
+from ...runtime.stage_names import sanitize_stage_name
 from ...runtime.recorder import RunRecorder
 from ...runtime.recording_utils import guard_report_to_dict
 
 
-_STAGE_SAFE = re.compile(r"[^a-zA-Z0-9_.-]+")
-
-
 def stage_tag_for_corner(corner_id: str) -> str:
-    text = str(corner_id or "").strip().lower()
-    if not text:
-        return "corner"
-    return _STAGE_SAFE.sub("_", text)
+    return sanitize_stage_name(corner_id, default="corner")
 
 
 def _metrics_values(metrics: MetricsBundle | None) -> dict[str, Any]:
